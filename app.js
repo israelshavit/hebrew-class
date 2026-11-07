@@ -227,7 +227,7 @@
         el("a", { class: "lesson-card", href: lessonUrl(lesson, "sheet") }, [
           el("span", { class: "lesson-date", text: formatDate(lesson.date) + (i === 0 ? " · Latest" : "") }),
           el("span", { class: "lesson-title", text: lesson.title }),
-          el("span", { class: "lesson-meta", text: lesson.forms.length + " phrases in " + lesson.sections.length + " sections" })
+          el("span", { class: "lesson-meta", text: lesson.sections.reduce(function (n, sec) { return n + sec.rows.length; }, 0) + " phrases in " + lesson.sections.length + " sections" })
         ])
       ]));
     });
