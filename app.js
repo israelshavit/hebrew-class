@@ -152,6 +152,112 @@
     return text.replace(NIQQUD, "").trim();
   }
 
+  /* ---------- Speech (the browser's built-in Hebrew voice) ---------- */
+
+  var speech = window.speechSynthesis || null;
+
+  function hebrewVoice() {
+    var voices = speech ? speech.getVoices() : [];
+    var he = voices.filter(function (v) { return /^(he|iw)\b/i.test(v.lang); });
+    // Prefer the higher-quality online/natural voices when there is a choice.
+    he.sort(function (a, b) { return voiceScore(b) - voiceScore(a); });
+    return he[0] || null;
+  }
+
+  function voiceScore(v) {
+    return (/natural|online|google/i.test(v.name) ? 2 : 0) + (v.localService ? 0 : 1);
+  }
+
+  // "מָה נִשְׁמַע? / מָה קוֹרֶה?" reads as two phrases; "קוֹרְאִים לִי..." drops the dots.
+  function speakableText(text) {
+    return text.replace(/\s*\/\s*/g, ", ").replace(/\.{2,}|…/g, " ").trim();
+  }
+
+  // Uses the device's Hebrew voice when it has one; otherwise plays Google's
+  // Hebrew text-to-speech audio (only the phrase text is sent).
+  function speak(texts) {
+    texts = [].concat(texts).map(speakableText);
+    stopSpeaking();
+    var voice = hebrewVoice();
+    if (voice) {
+      texts.forEach(function (text) {
+        var u = new SpeechSynthesisUtterance(text);
+        u.lang = "he-IL";
+        u.voice = voice;
+        u.rate = 0.85;
+        speech.speak(u);
+      });
+    } else {
+      playOnline(texts, 0);
+    }
+  }
+
+  var currentAudio = null;
+
+  function stopSpeaking() {
+    if (speech) speech.cancel();
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  }
+
+  function playOnline(texts, i) {
+    if (i >= texts.length) return;
+    var audio = new Audio(TTS_URL + encodeURIComponent(texts[i]));
+    currentAudio = audio;
+    audio.playbackRate = 0.9;
+    audio.onended = function () { if (currentAudio === audio) playOnline(texts, i + 1); };
+    audio.onerror = function () { if (currentAudio === audio) warnNoVoice(); };
+    var played = audio.play();
+    if (played && played.catch) played.catch(function () { if (currentAudio === audio) warnNoVoice(); });
+  }
+
+  var TTS_URL = "https://translate.google.com/translate_tts?ie=UTF-8&tl=iw&client=tw-ob&q=";
+
+  function warnNoVoice() {
+    var message = "Couldn't play the sound. Check your internet connection and volume, or open the site in Microsoft Edge or on a phone.";
+    var old = document.getElementById("speech-toast");
+    if (old) old.remove();
+    var toast = el("div", { class: "toast no-print", id: "speech-toast", role: "status", text: message });
+    document.body.appendChild(toast);
+    setTimeout(function () { toast.remove(); }, 6000);
+  }
+
+  if (speech) {
+    speech.getVoices();
+    if ("onvoiceschanged" in speech) speech.onvoiceschanged = function () { speech.getVoices(); };
+  }
+
+  var SVG_NS = "http://www.w3.org/2000/svg";
+
+  function speakerIcon() {
+    var svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    [
+      "M4 9h4l5-4v14l-5-4H4z",
+      "M16 8.5a4.5 4.5 0 0 1 0 7",
+      "M18.5 6a8 8 0 0 1 0 12"
+    ].forEach(function (d, i) {
+      var p = document.createElementNS(SVG_NS, "path");
+      p.setAttribute("d", d);
+      if (i === 0) p.setAttribute("class", "fill");
+      svg.appendChild(p);
+    });
+    return svg;
+  }
+
+  // texts: one Hebrew string, or several (male and female forms) read one after another.
+  function speakButton(texts, extraClass) {
+    var btn = el("button", {
+      class: "speak-btn no-print" + (extraClass ? " " + extraClass : ""),
+      type: "button",
+      title: "Listen",
+      "aria-label": "Listen to the Hebrew",
+      onclick: function (e) { e.stopPropagation(); speak(texts); }
+    });
+    btn.appendChild(speakerIcon());
+    return btn;
+  }
+
   function shuffle(list) {
     for (var i = list.length - 1; i > 0; i--) {
       var j = Math.floor(Math.random() * (i + 1));
@@ -318,7 +424,10 @@
           })),
           el("td", { class: "he", lang: "he", dir: "rtl" }, formSpans(row, function (f) {
             return heb(f.he);
-          }))
+          }, true).concat([
+            // Sits in the page's right margin so it never changes the sheet's fit.
+            speakButton(row.forms.map(function (f) { return f.he; }), "sheet-speak")
+          ]))
         ]));
       });
     });
@@ -346,11 +455,17 @@
   }
 
   // Male and female forms share a line when there is room; each form stays whole.
-  function formSpans(row, textOf) {
+  // With speakable, clicking a Hebrew form reads just that form aloud.
+  function formSpans(row, textOf, speakable) {
     var nodes = [];
     row.forms.forEach(function (f, i) {
       if (i > 0) nodes.push(el("span", { class: "sep", text: " · " }));
-      nodes.push(el("span", { class: "form", text: textOf(f) }));
+      nodes.push(el("span", {
+        class: "form" + (speakable ? " speakable" : ""),
+        title: speakable ? "Click to listen" : null,
+        onclick: speakable ? function () { speak(f.he); } : null,
+        text: textOf(f)
+      }));
     });
     return nodes;
   }
@@ -423,7 +538,8 @@
       return el("div", { class: "card-form" }, [
         f.g ? el("span", { class: "card-gender", text: genderLabel(row, f.g) }) : null,
         el("p", { class: "card-he", lang: "he", dir: "rtl", text: heb(f.he) }),
-        el("p", { class: "card-tr", text: f.tr })
+        el("p", { class: "card-tr", text: f.tr }),
+        speakButton(f.he, "big")
       ]);
     });
 
@@ -627,7 +743,9 @@
         right ? "Correct! " : "Not quite. The answer is ",
         right ? null : el("span", { lang: "he", dir: "rtl", text: heb(item.form.he) }),
         right ? null : " ",
-        el("span", { class: "tr", text: "(" + item.form.tr + ")" })
+        el("span", { class: "tr", text: "(" + item.form.tr + ")" }),
+        " ",
+        speakButton(item.form.he)
       ]));
       children.push(nextButton(quiz));
     }
@@ -763,7 +881,9 @@
           return el("li", null, [
             el("strong", { text: promptFor(f) }),
             el("span", { class: "he", lang: "he", dir: "rtl", text: heb(f.he) }),
-            el("span", { class: "tr", text: f.tr })
+            el("span", { class: "tr", text: f.tr }),
+            " ",
+            speakButton(f.he)
           ]);
         }))
       ]));
