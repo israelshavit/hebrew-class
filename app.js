@@ -25,8 +25,18 @@
     niqqud: readSetting("hebrewClass.niqqud", "1") !== "0",
     studentName: readSetting("hebrewClass.studentName", ""),
     quiz: null,
-    loadErrors: []
+    loadErrors: [],
+    teacher: {
+      passcode: readSetting("hebrewClass.teacherPasscode", ""),
+      results: null,
+      loading: false,
+      error: "",
+      updatedAt: null,
+      selected: null
+    }
   };
+
+  var REFRESH_MS = 30000;
 
   /* ---------- Storage (per-browser conveniences only) ---------- */
 
@@ -175,6 +185,7 @@
 
   function parseHash() {
     var parts = location.hash.replace(/^#\/?/, "").split("/");
+    if (parts[0] === "teacher") return { view: "teacher" };
     if (parts[0] === "lesson" && parts[1]) {
       return {
         view: "lesson",
@@ -188,6 +199,7 @@
   function onRouteChange() {
     state.route = parseHash();
     if (state.quiz && state.quiz.lessonId !== state.route.lessonId) state.quiz = null;
+    if (state.route.view === "teacher") loadResults();
     render();
     window.scrollTo(0, 0);
   }
@@ -197,15 +209,18 @@
   function render() {
     var app = document.getElementById("app");
     app.textContent = "";
-    if (state.route.view === "lesson") {
+    if (state.route.view === "teacher") {
+      app.appendChild(renderTeacher());
+    } else if (state.route.view === "lesson") {
       var lesson = findLesson(state.route.lessonId);
       app.appendChild(lesson ? renderLesson(lesson) : renderNotFound());
     } else {
       app.appendChild(renderHome());
     }
-    document.title = state.route.view === "lesson" && findLesson(state.route.lessonId)
-      ? findLesson(state.route.lessonId).title + " · Hebrew Class"
-      : "Hebrew Class";
+    document.title = state.route.view === "teacher" ? "Teacher dashboard · Hebrew Class"
+      : state.route.view === "lesson" && findLesson(state.route.lessonId)
+        ? findLesson(state.route.lessonId).title + " · Hebrew Class"
+        : "Hebrew Class";
     fitSheet();
   }
 
@@ -629,15 +644,8 @@
       missed: quiz.missed.map(function (f) { return promptFor(f) + " = " + plain(f.he); }).join("; "),
       finishedAt: new Date().toISOString()
     };
-    // Apps Script web apps do not answer CORS preflights, so send a simple
-    // text/plain request; the response is opaque but the row is recorded.
-    fetch(config.resultsUrl, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload)
-    }).then(function () {
-      quiz.sendStatus = "sent";
+    callBackend(payload).then(function (res) {
+      quiz.sendStatus = res && res.ok ? "sent" : "failed";
     }, function () {
       quiz.sendStatus = "failed";
     }).then(function () {
@@ -689,7 +697,229 @@
     return el("div", { class: "card" }, children);
   }
 
+  /* ---------- Results backend ---------- */
+
+  // Apps Script web apps don't answer CORS preflights, so every call is a
+  // "simple" text/plain POST. Its JSON reply is readable cross-origin.
+  function callBackend(body) {
+    return fetch(config.resultsUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    });
+  }
+
+  /* ---------- Teacher dashboard ---------- */
+
+  function loadResults() {
+    var t = state.teacher;
+    if (!config.resultsUrl || !t.passcode || t.loading) return;
+    t.loading = true;
+    callBackend({ action: "list", passcode: t.passcode }).then(function (res) {
+      if (res && res.ok) {
+        t.results = res.results || [];
+        t.error = "";
+        t.updatedAt = new Date();
+      } else if (res && res.error === "wrong-passcode") {
+        t.passcode = "";
+        t.results = null;
+        t.error = "That passcode didn't work. Check it matches the one in your Google script.";
+        writeSetting("hebrewClass.teacherPasscode", "");
+      } else {
+        t.error = "The results service replied with an error.";
+      }
+    }, function () {
+      t.error = "Couldn't reach the results service. Check your connection; it will retry.";
+    }).then(function () {
+      t.loading = false;
+      if (state.route.view === "teacher") render();
+    });
+  }
+
+  function studentKey(name) {
+    return String(name).trim().toLowerCase().replace(/\s+/g, " ");
+  }
+
+  function formatTime(iso) {
+    var d = new Date(iso);
+    if (isNaN(d)) return iso;
+    return d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function scoreClass(score, total) {
+    var pct = total ? score / total : 0;
+    return pct >= 0.8 ? "good" : pct >= 0.5 ? "ok" : "low";
+  }
+
+  function renderTeacher() {
+    var t = state.teacher;
+    var wrap = el("section", null, [
+      el("a", { class: "back", href: "#/", text: "← All lessons" }),
+      el("h1", { text: "Teacher dashboard" })
+    ]);
+
+    if (!config.resultsUrl) {
+      wrap.appendChild(el("p", { class: "notice", text: "Quiz results aren't connected yet. Follow “Getting quiz results” in README.md, then add the script URL to config.js." }));
+      return wrap;
+    }
+
+    if (!t.passcode) {
+      var input = el("input", { type: "password", required: true, autocomplete: "current-password", id: "teacher-passcode" });
+      wrap.appendChild(el("form", {
+        class: "card",
+        onsubmit: function (e) {
+          e.preventDefault();
+          var code = input.value.trim();
+          if (!code) return;
+          t.passcode = code;
+          t.error = "";
+          writeSetting("hebrewClass.teacherPasscode", code);
+          loadResults();
+          render();
+        }
+      }, [
+        el("p", { style: "margin-top:0", text: "Enter the passcode you set in your Google script. This device will remember it." }),
+        t.error ? el("p", { class: "notice error", text: t.error }) : null,
+        el("label", { class: "field" }, [el("span", { text: "Passcode" }), input]),
+        el("div", { class: "actions" }, [el("button", { class: "btn primary", type: "submit", text: "Open dashboard" })])
+      ]));
+      return wrap;
+    }
+
+    var status = t.loading && !t.results ? "Loading results…"
+      : t.updatedAt ? "Updated " + t.updatedAt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " · refreshes every 30 seconds"
+      : "";
+    wrap.appendChild(el("div", { class: "toolbar dash-toolbar" }, [
+      el("p", { class: "dash-status", text: status }),
+      el("button", { class: "btn", type: "button", text: t.loading ? "Refreshing…" : "Refresh", disabled: t.loading, onclick: loadResults }),
+      el("button", {
+        class: "btn",
+        type: "button",
+        text: "Sign out",
+        onclick: function () {
+          t.passcode = "";
+          t.results = null;
+          t.updatedAt = null;
+          t.selected = null;
+          writeSetting("hebrewClass.teacherPasscode", "");
+          render();
+        }
+      })
+    ]));
+    if (t.error) wrap.appendChild(el("p", { class: "notice error", text: t.error }));
+    if (!t.results) return wrap;
+    if (!t.results.length) {
+      wrap.appendChild(el("p", { class: "notice", text: "No quiz results yet. They appear here as soon as a student finishes a quiz." }));
+      return wrap;
+    }
+
+    wrap.appendChild(renderScoreGrid(t));
+    if (t.selected) wrap.appendChild(renderAttempts(t));
+    wrap.appendChild(renderRecent(t));
+    return wrap;
+  }
+
+  // Students down the side, lessons across the top; each cell is the best score.
+  function renderScoreGrid(t) {
+    var students = {};
+    var lessonIds = lessons.slice().reverse().map(function (l) { return l.id; });
+    var lessonTitles = {};
+    t.results.forEach(function (r) {
+      var key = studentKey(r.student);
+      if (!students[key]) students[key] = { name: r.student.trim(), byLesson: {} };
+      var cell = students[key].byLesson[r.lessonId] || (students[key].byLesson[r.lessonId] = []);
+      cell.push(r);
+      if (lessonIds.indexOf(r.lessonId) === -1) lessonIds.push(r.lessonId);
+      lessonTitles[r.lessonId] = r.lessonTitle;
+    });
+    var keys = Object.keys(students).sort(function (a, b) { return a < b ? -1 : a > b ? 1 : 0; });
+
+    var head = el("tr", null, [el("th", { scope: "col", text: "Student" })].concat(lessonIds.map(function (id) {
+      var lesson = findLesson(id);
+      return el("th", { scope: "col" }, [
+        el("span", { class: "col-date", text: lesson ? formatDate(lesson.date) : "" }),
+        el("span", { class: "col-title", text: lesson ? lesson.title : lessonTitles[id] || id })
+      ]);
+    })));
+
+    var body = el("tbody", null, keys.map(function (key) {
+      var s = students[key];
+      return el("tr", null, [el("th", { scope: "row", text: s.name })].concat(lessonIds.map(function (id) {
+        var attempts = s.byLesson[id];
+        if (!attempts) return el("td", { class: "empty", text: "–" });
+        var best = attempts.reduce(function (a, b) {
+          return b.score / b.total > a.score / a.total ? b : a;
+        });
+        var selected = t.selected && t.selected.student === key && t.selected.lessonId === id;
+        return el("td", null, [el("button", {
+          type: "button",
+          class: "cell " + scoreClass(best.score, best.total) + (selected ? " selected" : ""),
+          "aria-label": s.name + ": best " + best.score + " of " + best.total + ", " + attempts.length + " tries. Show details",
+          onclick: function () {
+            t.selected = selected ? null : { student: key, lessonId: id };
+            render();
+          }
+        }, [
+          el("span", { class: "cell-score", text: best.score + "/" + best.total }),
+          el("span", { class: "cell-tries", text: attempts.length === 1 ? "1 try" : attempts.length + " tries" })
+        ])]);
+      })));
+    }));
+
+    return el("div", { class: "card dash-card" }, [
+      el("h2", { text: "Best score per lesson" }),
+      el("p", { class: "hint", text: "Tap a score to see each try and the phrases missed." }),
+      el("div", { class: "grid-scroll" }, [el("table", { class: "score-grid" }, [el("thead", null, [head]), body])])
+    ]);
+  }
+
+  function renderAttempts(t) {
+    var sel = t.selected;
+    var attempts = t.results.filter(function (r) {
+      return studentKey(r.student) === sel.student && r.lessonId === sel.lessonId;
+    }).sort(function (a, b) { return a.finishedAt < b.finishedAt ? 1 : -1; });
+    if (!attempts.length) return null;
+    var lesson = findLesson(sel.lessonId);
+    return el("div", { class: "card dash-card" }, [
+      el("h2", { text: attempts[attempts.length - 1].student.trim() + " · " + (lesson ? lesson.title : attempts[0].lessonTitle) }),
+      el("ul", { class: "attempts" }, attempts.map(function (r) {
+        return el("li", null, [
+          el("div", { class: "attempt-head" }, [
+            el("strong", { class: "score-pill " + scoreClass(r.score, r.total), text: r.score + " / " + r.total }),
+            el("span", { class: "muted", text: formatTime(r.finishedAt) })
+          ]),
+          r.missed ? el("p", { class: "attempt-missed", text: "Missed: " + r.missed }) : el("p", { class: "attempt-missed", text: "No mistakes." })
+        ]);
+      }))
+    ]);
+  }
+
+  function renderRecent(t) {
+    var recent = t.results.slice().sort(function (a, b) { return a.finishedAt < b.finishedAt ? 1 : -1; }).slice(0, 10);
+    return el("div", { class: "card dash-card" }, [
+      el("h2", { text: "Latest quizzes" }),
+      el("ul", { class: "recent" }, recent.map(function (r) {
+        var lesson = findLesson(r.lessonId);
+        return el("li", null, [
+          el("span", { class: "recent-name", text: r.student.trim() }),
+          el("span", { class: "muted", text: (lesson ? lesson.title : r.lessonTitle) + " · " + formatTime(r.finishedAt) }),
+          el("strong", { class: "score-pill " + scoreClass(r.score, r.total), text: r.score + " / " + r.total })
+        ]);
+      }))
+    ]);
+  }
+
   /* ---------- Start ---------- */
+
+  setInterval(function () {
+    if (state.route.view === "teacher" && !document.hidden) loadResults();
+  }, REFRESH_MS);
+  document.addEventListener("visibilitychange", function () {
+    if (state.route.view === "teacher" && !document.hidden) loadResults();
+  });
 
   window.addEventListener("hashchange", onRouteChange);
   window.addEventListener("resize", scalePage);
@@ -699,6 +929,7 @@
     loadLessons(function () {
       lessons.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
       state.route = parseHash();
+      if (state.route.view === "teacher") loadResults();
       render();
       if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitSheet);
     });
