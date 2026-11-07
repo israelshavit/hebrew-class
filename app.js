@@ -25,6 +25,7 @@
     niqqud: readSetting("hebrewClass.niqqud", "1") !== "0",
     studentName: readSetting("hebrewClass.studentName", ""),
     quiz: null,
+    cards: null,
     loadErrors: [],
     teacher: {
       passcode: readSetting("hebrewClass.teacherPasscode", ""),
@@ -178,7 +179,7 @@
   }
 
   function lessonUrl(lesson, tab) {
-    return "#/lesson/" + encodeURIComponent(lesson.id) + (tab === "quiz" ? "/quiz" : "");
+    return "#/lesson/" + encodeURIComponent(lesson.id) + (tab === "quiz" || tab === "cards" ? "/" + tab : "");
   }
 
   /* ---------- Routing ---------- */
@@ -190,7 +191,7 @@
       return {
         view: "lesson",
         lessonId: decodeURIComponent(parts[1]),
-        tab: parts[2] === "quiz" ? "quiz" : "sheet"
+        tab: parts[2] === "quiz" || parts[2] === "cards" ? parts[2] : "sheet"
       };
     }
     return { view: "home" };
@@ -199,6 +200,7 @@
   function onRouteChange() {
     state.route = parseHash();
     if (state.quiz && state.quiz.lessonId !== state.route.lessonId) state.quiz = null;
+    if (state.cards && state.cards.lessonId !== state.route.lessonId) state.cards = null;
     if (state.route.view === "teacher") loadResults();
     render();
     window.scrollTo(0, 0);
@@ -266,10 +268,12 @@
       el("p", { class: "lesson-date", text: formatDate(lesson.date) }),
       el("nav", { class: "tabs", "aria-label": "Lesson" }, [
         el("a", { class: "tab" + (tab === "sheet" ? " active" : ""), href: lessonUrl(lesson, "sheet"), "aria-current": tab === "sheet" ? "page" : null, text: "Lesson sheet" }),
+        el("a", { class: "tab" + (tab === "cards" ? " active" : ""), href: lessonUrl(lesson, "cards"), "aria-current": tab === "cards" ? "page" : null, text: "Word by word" }),
         el("a", { class: "tab" + (tab === "quiz" ? " active" : ""), href: lessonUrl(lesson, "quiz"), "aria-current": tab === "quiz" ? "page" : null, text: "Quiz" })
       ])
     ]);
-    return el("section", null, [head, tab === "quiz" ? renderQuiz(lesson) : renderSheetTab(lesson)]);
+    var body = tab === "quiz" ? renderQuiz(lesson) : tab === "cards" ? renderCards(lesson) : renderSheetTab(lesson);
+    return el("section", null, [head, body]);
   }
 
   function niqqudToggle() {
@@ -373,6 +377,97 @@
     var scale = Math.min(1, frame.clientWidth / PAGE_W);
     page.style.transform = "scale(" + scale + ")";
     frame.style.height = Math.ceil(PAGE_H * scale) + "px";
+  }
+
+  /* ---------- Word by word ---------- */
+
+  // Every row of the lesson in order, with its section, for stepping through one at a time.
+  function cardList(lesson) {
+    var list = [];
+    lesson.sections.forEach(function (section, si) {
+      section.rows.forEach(function (row) {
+        list.push({ row: row, section: section, sectionNo: si + 1 });
+      });
+    });
+    return list;
+  }
+
+  function moveCard(step) {
+    var c = state.cards;
+    if (!c) return;
+    var next = Math.max(0, Math.min(c.count - 1, c.index + step));
+    if (next === c.index) return;
+    c.index = next;
+    render();
+  }
+
+  function genderLabel(row, g) {
+    var toSomeone = /\(to m\/f\)/.test(row.en);
+    if (g === "m") return toSomeone ? "To a man" : "Male";
+    return toSomeone ? "To a woman" : "Female";
+  }
+
+  function renderCards(lesson) {
+    var list = cardList(lesson);
+    if (!state.cards) state.cards = { lessonId: lesson.id, index: 0 };
+    var c = state.cards;
+    c.count = list.length;
+    if (!list.length) return el("p", { class: "notice", text: "This lesson has no phrases yet." });
+    if (c.index >= list.length) c.index = list.length - 1;
+    var item = list[c.index];
+    var row = item.row;
+    var first = c.index === 0;
+    var last = c.index === list.length - 1;
+
+    var forms = row.forms.map(function (f) {
+      return el("div", { class: "card-form" }, [
+        f.g ? el("span", { class: "card-gender", text: genderLabel(row, f.g) }) : null,
+        el("p", { class: "card-he", lang: "he", dir: "rtl", text: heb(f.he) }),
+        el("p", { class: "card-tr", text: f.tr })
+      ]);
+    });
+
+    var card = el("div", { class: "card word-card" }, [
+      el("p", { class: "card-section", text: item.sectionNo + ". " + item.section.title }),
+      el("div", { class: "card-forms" + (forms.length > 1 ? " two" : "") }, forms),
+      el("p", { class: "card-en", text: row.en.replace(/\s*\((to )?m\/f\)/, "") })
+    ]);
+    addSwipe(card);
+
+    var pct = Math.round(((c.index + 1) / list.length) * 100);
+    var nav = el("div", { class: "card-nav" }, [
+      el("button", { class: "btn", type: "button", disabled: first, onclick: function () { moveCard(-1); }, text: "← Previous" }),
+      el("span", { class: "card-count", "aria-live": "polite", text: (c.index + 1) + " / " + list.length }),
+      last
+        ? el("button", { class: "btn primary", type: "button", onclick: function () { c.index = 0; render(); }, text: "Start over" })
+        : el("button", { class: "btn primary", type: "button", onclick: function () { moveCard(1); }, text: "Next word →" })
+    ]);
+
+    return el("div", { class: "cards-view" }, [
+      el("div", { class: "toolbar no-print", style: "margin-bottom:16px" }, [niqqudToggle()]),
+      el("div", { class: "progress-bar", "aria-hidden": "true" }, [el("span", { style: "width:" + pct + "%" })]),
+      card,
+      nav,
+      el("p", { class: "hint card-hint", text: "Tip: use the ← → arrow keys to move between words." })
+    ]);
+  }
+
+  // Swipe left for the next word, right for the previous one.
+  function addSwipe(node) {
+    var startX = null;
+    var startY = null;
+    node.addEventListener("touchstart", function (e) {
+      if (e.touches.length !== 1) { startX = null; return; }
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+    }, { passive: true });
+    node.addEventListener("touchend", function (e) {
+      if (startX === null) return;
+      var dx = e.changedTouches[0].clientX - startX;
+      var dy = e.changedTouches[0].clientY - startY;
+      startX = null;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) moveCard(dx < 0 ? 1 : -1);
+    });
   }
 
   /* ---------- Quiz ---------- */
@@ -923,6 +1018,12 @@
 
   window.addEventListener("hashchange", onRouteChange);
   window.addEventListener("resize", scalePage);
+  document.addEventListener("keydown", function (e) {
+    if (state.route.view !== "lesson" || state.route.tab !== "cards") return;
+    if (e.altKey || e.ctrlKey || e.metaKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (e.key === "ArrowRight") { e.preventDefault(); moveCard(1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); moveCard(-1); }
+  });
   window.addEventListener("beforeprint", fitSheet);
 
   document.addEventListener("DOMContentLoaded", function () {
