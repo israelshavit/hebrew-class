@@ -1030,7 +1030,7 @@
     writeSetting("hebrewClass.teacherPasscode", "");
   }
 
-  // Re-render only when what's shown changes, so a half-typed email isn't wiped.
+  // Re-render only when what's shown changes, so a half-typed name isn't wiped.
   function renderLiveIfChanged() {
     if (state.route.view !== "lesson" || state.route.tab !== "live") return;
     if (liveKey() !== live.shownKey) render();
@@ -1039,7 +1039,11 @@
   function liveKey() {
     var r = live.remote || {};
     return [live.checked, live.error, r.running, r.lessonId, r.sessionId, liveIndex(), live.joinedSession,
-      isLiveTeacher(), live.signInError, live.attendees.map(function (a) { return a.email; }).join(",")].join("|");
+      isLiveTeacher(), live.signInError, live.attendees.map(attendeeLabel).join(",")].join("|");
+  }
+
+  function attendeeLabel(a) {
+    return a.name || a.email || "";
   }
 
   function liveIndex() {
@@ -1110,23 +1114,27 @@
     });
   }
 
-  function joinLiveClass(email) {
+  function joinLiveClass(name, email) {
     live.joining = true;
     live.joinError = "";
     render();
-    callBackend({ action: "liveJoin", email: email }).then(function (res) {
+    callBackend({ action: "liveJoin", name: name, email: email }).then(function (res) {
       if (res && res.ok) {
         live.remote = res;
         live.joinedSession = res.sessionId;
         live.joinedThisVisit = true;
+        state.studentName = name;
         live.email = email;
+        writeSetting("hebrewClass.studentName", name);
         writeSetting("hebrewClass.liveEmail", email);
         writeSetting("hebrewClass.liveSession", res.sessionId);
       } else if (res && res.error === "not-live") {
         live.remote = { running: false };
         live.joinError = "The class isn't live right now.";
+      } else if (res && res.error === "bad-name") {
+        live.joinError = "Please enter your name.";
       } else if (res && res.error === "bad-email") {
-        live.joinError = "That doesn't look like an email address.";
+        live.joinError = "That email doesn't look right. You can also leave it empty.";
       } else {
         live.joinError = "Couldn't join. Try again.";
       }
@@ -1188,7 +1196,7 @@
       var other = r.running && findLesson(r.lessonId);
       wrap.appendChild(el("div", { class: "card live-start" }, [
         el("h2", { text: "Teach this lesson live" }),
-        el("p", { text: "Start the class, then share this page's link with your students. They join with their email and see whichever word you're on, a few seconds after you move." }),
+        el("p", { text: "Start the class, then share this page's link with your students. They join with their name and see whichever word you're on, a few seconds after you move." }),
         r.running ? el("p", { class: "notice", text: "A live class is already running for “" + (other ? other.title : r.lessonId) + "”. Starting here ends it." }) : null,
         el("div", { class: "actions" }, [
           el("button", { class: "btn primary", type: "button", disabled: live.busy, onclick: function () { startLiveClass(lesson); }, text: live.busy ? "Starting…" : "Start live class" })
@@ -1207,7 +1215,7 @@
       ]),
       el("p", { class: "muted", text: people.length ? people.length + (people.length === 1 ? " student has" : " students have") + " joined:" : "No students have joined yet. Share this page's link with them." }),
       people.length ? el("ul", { class: "live-people" }, people.map(function (p) {
-        return el("li", { text: p.email });
+        return el("li", { text: attendeeLabel(p) });
       })) : null,
       el("p", { class: "hint", text: "Use the ← → arrow keys or the buttons to move. Students' screens follow within a few seconds." })
     ]));
@@ -1242,7 +1250,7 @@
     } else {
       live.joinedThisVisit = true;
       liveCard(lesson, liveIndex(), false).forEach(function (n) { wrap.appendChild(n); });
-      wrap.appendChild(el("p", { class: "hint live-signed", text: "Joined as " + live.email }));
+      wrap.appendChild(el("p", { class: "hint live-signed", text: "Joined as " + state.studentName }));
       return wrap;
     }
     wrap.appendChild(teacherSignIn());
@@ -1250,10 +1258,18 @@
   }
 
   function joinForm() {
-    var input = el("input", {
+    var nameInput = el("input", {
+      type: "text",
+      id: "live-name",
+      required: true,
+      maxlength: "60",
+      autocomplete: "name",
+      value: state.studentName,
+      oninput: function (e) { state.studentName = e.target.value; }
+    });
+    var emailInput = el("input", {
       type: "email",
       id: "live-email",
-      required: true,
       autocomplete: "email",
       value: live.email,
       oninput: function (e) { live.email = e.target.value; }
@@ -1262,13 +1278,14 @@
       class: "card live-start",
       onsubmit: function (e) {
         e.preventDefault();
-        var email = input.value.trim();
-        if (email && !live.joining) joinLiveClass(email);
+        var name = nameInput.value.trim();
+        if (name && !live.joining) joinLiveClass(name, emailInput.value.trim());
       }
     }, [
       el("h2", null, [el("span", { class: "live-dot on", "aria-hidden": "true" }), "The class is live"]),
-      el("p", { text: "Enter your email to join. You'll see the word your teacher is on." }),
-      el("div", { class: "field" }, [el("label", { for: "live-email", text: "Your email" }), input]),
+      el("p", { text: "Enter your name to join. You'll see the word your teacher is on." }),
+      el("div", { class: "field" }, [el("label", { for: "live-name", text: "Your name" }), nameInput]),
+      el("div", { class: "field" }, [el("label", { for: "live-email", text: "Your email (optional)" }), emailInput]),
       live.joinError ? el("p", { class: "notice error", text: live.joinError }) : null,
       el("button", { class: "btn primary", type: "submit", disabled: live.joining, text: live.joining ? "Joining…" : "Join the class" })
     ]);

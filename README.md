@@ -38,10 +38,10 @@ If you change `Code.gs` later (including the passcode), use **Deploy → Manage 
 
 1. Open the lesson, go to the **Live class** tab and open **Teacher? Sign in to run the class** at the bottom. Enter your teacher passcode (once per browser).
 2. Press **Start live class** and send students the link to that page.
-3. Students enter their email and press **Join the class**. Their names appear under **Live now**, and each join is saved on the **Attendance** tab of your Google Sheet.
+3. Students enter their name (email is optional) and press **Join the class**. Their names appear under **Live now**, and each join is saved on the **Attendance** tab of your Google Sheet.
 4. Move with **Next word** / **Previous** or the ← → arrow keys. Students' screens follow within a few seconds (they check every 2–3 seconds through the Google script). Each student can press 🔊 to hear the word.
 5. Press **End class** when you're done. A class nobody ends stops being live after 4 hours.
 
-Students can only join while a class is running. The email isn't verified; it identifies who attended.
+Students can only join while a class is running. Names and emails aren't verified; they identify who attended.
 
 The live class uses the same Google script as the quiz results, so after updating `Code.gs` paste the new version into Apps Script and deploy a new version (see above). Until then the Live class tab says it can't reach the class service.

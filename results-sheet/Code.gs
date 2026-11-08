@@ -41,7 +41,8 @@ function isTeacher(data) {
 var LIVE_KEY = "liveClass";
 var LIVE_MAX_HOURS = 4; // A class nobody ended stops counting as live after this.
 var ATTENDANCE_SHEET = "Attendance";
-var ATTENDANCE_HEADERS = ["Joined", "Email", "Lesson ID", "Class ID"];
+// Name is last so sheets made before it was added keep their columns.
+var ATTENDANCE_HEADERS = ["Joined", "Email", "Lesson ID", "Class ID", "Name"];
 
 function liveState() {
   var cache = CacheService.getScriptCache();
@@ -96,18 +97,22 @@ function liveEnd() {
   return reply({ ok: true, running: false });
 }
 
+// Name is required; email is optional, but checked when given.
 function liveJoin(data) {
+  var name = String(data.name || "").trim().replace(/\s+/g, " ").slice(0, 60);
+  if (!name) return reply({ ok: false, error: "bad-name" });
   var email = String(data.email || "").trim().toLowerCase().slice(0, 120);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return reply({ ok: false, error: "bad-email" });
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return reply({ ok: false, error: "bad-email" });
   var live = liveState();
   if (!live.running) return reply({ ok: false, error: "not-live" });
   withLock(function () {
-    attendanceSheet().appendRow([new Date(), safe(email, 120), live.lessonId, live.sessionId]);
+    attendanceSheet().appendRow([new Date(), safe(email, 120), live.lessonId, live.sessionId, safe(name, 60)]);
   });
   return reply(liveReply(live));
 }
 
-// Everyone who joined the class that is running now (each email once).
+// Everyone who joined the class that is running now (each person once:
+// by email when they gave one, otherwise by name).
 function liveAttendees() {
   var live = liveState();
   if (!live.running) return reply({ ok: true, running: false, attendees: [] });
@@ -115,9 +120,11 @@ function liveAttendees() {
   var attendees = [];
   attendanceSheet().getDataRange().getValues().slice(1).forEach(function (r) {
     var email = String(r[1] || "").replace(/^'/, "");
-    if (String(r[3]) !== live.sessionId || seen[email]) return;
-    seen[email] = true;
-    attendees.push({ email: email, joinedAt: r[0] instanceof Date ? r[0].toISOString() : String(r[0]) });
+    var name = String(r[4] || "").replace(/^'/, "");
+    var key = email || name.toLowerCase();
+    if (String(r[3]) !== live.sessionId || !key || seen[key]) return;
+    seen[key] = true;
+    attendees.push({ name: name, email: email, joinedAt: r[0] instanceof Date ? r[0].toISOString() : String(r[0]) });
   });
   return reply({ ok: true, running: true, attendees: attendees });
 }
@@ -128,6 +135,8 @@ function attendanceSheet() {
   if (s.getLastRow() === 0) {
     s.appendRow(ATTENDANCE_HEADERS);
     s.setFrozenRows(1);
+  } else if (s.getLastColumn() < ATTENDANCE_HEADERS.length) {
+    s.getRange(1, 1, 1, ATTENDANCE_HEADERS.length).setValues([ATTENDANCE_HEADERS]); // older sheet: add the Name header
   }
   return s;
 }
