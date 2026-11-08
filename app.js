@@ -722,15 +722,19 @@
         else if (opt === item.picked) cls += " wrong";
         else cls += " faded";
       }
-      return el("button", {
-        class: cls,
-        type: "button",
-        lang: "he",
-        dir: "rtl",
-        disabled: answered,
-        onclick: function () { answerChoice(quiz, item, opt); },
-        text: heb(opt.he)
-      });
+      // The listen button sits beside the option, not inside it (buttons can't nest).
+      return el("div", { class: "option-row" }, [
+        el("button", {
+          class: cls,
+          type: "button",
+          lang: "he",
+          dir: "rtl",
+          disabled: answered,
+          onclick: function () { answerChoice(quiz, item, opt); },
+          text: heb(opt.he)
+        }),
+        speakButton(opt.he, "option-speak")
+      ]);
     }));
 
     var children = renderProgress(quiz).concat([
