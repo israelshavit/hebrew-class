@@ -285,7 +285,7 @@
   }
 
   function lessonUrl(lesson, tab) {
-    return "#/lesson/" + encodeURIComponent(lesson.id) + (tab === "quiz" || tab === "cards" ? "/" + tab : "");
+    return "#/lesson/" + encodeURIComponent(lesson.id) + (tab === "quiz" || tab === "cards" || tab === "live" ? "/" + tab : "");
   }
 
   /* ---------- Routing ---------- */
@@ -297,7 +297,7 @@
       return {
         view: "lesson",
         lessonId: decodeURIComponent(parts[1]),
-        tab: parts[2] === "quiz" || parts[2] === "cards" ? parts[2] : "sheet"
+        tab: parts[2] === "quiz" || parts[2] === "cards" || parts[2] === "live" ? parts[2] : "sheet"
       };
     }
     return { view: "home" };
@@ -310,6 +310,7 @@
     if (state.route.view === "teacher") loadResults();
     render();
     window.scrollTo(0, 0);
+    startLivePolling();
   }
 
   /* ---------- Rendering ---------- */
@@ -375,10 +376,14 @@
       el("nav", { class: "tabs", "aria-label": "Lesson" }, [
         el("a", { class: "tab" + (tab === "sheet" ? " active" : ""), href: lessonUrl(lesson, "sheet"), "aria-current": tab === "sheet" ? "page" : null, text: "Lesson sheet" }),
         el("a", { class: "tab" + (tab === "cards" ? " active" : ""), href: lessonUrl(lesson, "cards"), "aria-current": tab === "cards" ? "page" : null, text: "Word by word" }),
-        el("a", { class: "tab" + (tab === "quiz" ? " active" : ""), href: lessonUrl(lesson, "quiz"), "aria-current": tab === "quiz" ? "page" : null, text: "Quiz" })
+        el("a", { class: "tab" + (tab === "quiz" ? " active" : ""), href: lessonUrl(lesson, "quiz"), "aria-current": tab === "quiz" ? "page" : null, text: "Quiz" }),
+        el("a", { class: "tab" + (tab === "live" ? " active" : ""), href: lessonUrl(lesson, "live"), "aria-current": tab === "live" ? "page" : null }, [
+          liveDot(),
+          "Live class"
+        ])
       ])
     ]);
-    var body = tab === "quiz" ? renderQuiz(lesson) : tab === "cards" ? renderCards(lesson) : renderSheetTab(lesson);
+    var body = tab === "quiz" ? renderQuiz(lesson) : tab === "cards" ? renderCards(lesson) : tab === "live" ? renderLive(lesson) : renderSheetTab(lesson);
     return el("section", null, [head, body]);
   }
 
@@ -529,25 +534,9 @@
     c.count = list.length;
     if (!list.length) return el("p", { class: "notice", text: "This lesson has no phrases yet." });
     if (c.index >= list.length) c.index = list.length - 1;
-    var item = list[c.index];
-    var row = item.row;
     var first = c.index === 0;
     var last = c.index === list.length - 1;
-
-    var forms = row.forms.map(function (f) {
-      return el("div", { class: "card-form" }, [
-        f.g ? el("span", { class: "card-gender", text: genderLabel(row, f.g) }) : null,
-        el("p", { class: "card-he", lang: "he", dir: "rtl", text: heb(f.he) }),
-        el("p", { class: "card-tr", text: f.tr }),
-        speakButton(f.he, "big")
-      ]);
-    });
-
-    var card = el("div", { class: "card word-card" }, [
-      el("p", { class: "card-section", text: item.sectionNo + ". " + item.section.title }),
-      el("div", { class: "card-forms" + (forms.length > 1 ? " two" : "") }, forms),
-      el("p", { class: "card-en", text: row.en.replace(/\s*\((to )?m\/f\)/, "") })
-    ]);
+    var card = wordCard(list[c.index]);
     addSwipe(card);
 
     var pct = Math.round(((c.index + 1) / list.length) * 100);
@@ -568,8 +557,28 @@
     ]);
   }
 
+  // One phrase as a big card: Hebrew (both forms when there are two), transliteration, English.
+  function wordCard(item) {
+    var row = item.row;
+    var forms = row.forms.map(function (f) {
+      return el("div", { class: "card-form" }, [
+        f.g ? el("span", { class: "card-gender", text: genderLabel(row, f.g) }) : null,
+        el("p", { class: "card-he", lang: "he", dir: "rtl", text: heb(f.he) }),
+        el("p", { class: "card-tr", text: f.tr }),
+        speakButton(f.he, "big")
+      ]);
+    });
+
+    return el("div", { class: "card word-card" }, [
+      el("p", { class: "card-section", text: item.sectionNo + ". " + item.section.title }),
+      el("div", { class: "card-forms" + (forms.length > 1 ? " two" : "") }, forms),
+      el("p", { class: "card-en", text: row.en.replace(/\s*\((to )?m\/f\)/, "") })
+    ]);
+  }
+
   // Swipe left for the next word, right for the previous one.
-  function addSwipe(node) {
+  function addSwipe(node, move) {
+    move = move || moveCard;
     var startX = null;
     var startY = null;
     node.addEventListener("touchstart", function (e) {
@@ -582,7 +591,7 @@
       var dx = e.changedTouches[0].clientX - startX;
       var dy = e.changedTouches[0].clientY - startY;
       startX = null;
-      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) moveCard(dx < 0 ? 1 : -1);
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) move(dx < 0 ? 1 : -1);
     });
   }
 
@@ -931,6 +940,364 @@
     });
   }
 
+  /* ---------- Live class ---------- */
+
+  // The teacher steps through the words; every student who joined sees the same
+  // word. The current word lives in the Google script, which students check every
+  // few seconds, so a change reaches them within about 2 to 5 seconds.
+  var LIVE_POLL_JOINED_MS = 2500;
+  var LIVE_POLL_WAITING_MS = 6000;
+  var LIVE_POLL_TEACHER_MS = 8000;
+
+  var live = {
+    remote: null,          // { running, lessonId, index, sessionId } from the script
+    checked: false,        // false until the first answer arrives
+    error: "",
+    email: readSetting("hebrewClass.liveEmail", ""),
+    joinedSession: readSetting("hebrewClass.liveSession", ""),
+    joining: false,
+    joinError: "",
+    signInError: "",
+    attendees: [],
+    teacherIndex: null,    // the teacher's own position, ahead of the script while a change is sending
+    busy: false,
+    seq: 0,
+    joinedThisVisit: false,
+    timer: null,
+    shownKey: ""
+  };
+
+  function isLiveTeacher() {
+    return !!state.teacher.passcode;
+  }
+
+  function liveHere(lesson) {
+    return !!(live.remote && live.remote.running && live.remote.lessonId === lesson.id);
+  }
+
+  function liveDot() {
+    var lesson = state.route.lessonId && findLesson(state.route.lessonId);
+    var on = lesson && liveHere(lesson);
+    return el("span", { class: "live-dot" + (on ? " on" : ""), "aria-hidden": "true" });
+  }
+
+  function startLivePolling() {
+    clearTimeout(live.timer);
+    live.timer = null;
+    if (!config.resultsUrl) return;
+    if (state.route.view !== "lesson" || state.route.tab !== "live") return;
+    pollLive();
+  }
+
+  function scheduleLivePoll() {
+    clearTimeout(live.timer);
+    if (state.route.view !== "lesson" || state.route.tab !== "live") return;
+    var lesson = findLesson(state.route.lessonId);
+    var ms = isLiveTeacher() ? LIVE_POLL_TEACHER_MS
+      : lesson && liveHere(lesson) && live.joinedSession === live.remote.sessionId ? LIVE_POLL_JOINED_MS
+      : LIVE_POLL_WAITING_MS;
+    live.timer = setTimeout(pollLive, document.hidden ? Math.max(ms, 15000) : ms);
+  }
+
+  function pollLive() {
+    var teacher = isLiveTeacher();
+    var request = teacher
+      ? callBackend({ action: "liveAttendees", passcode: state.teacher.passcode }).then(function (res) {
+        if (res && res.ok) live.attendees = res.attendees || [];
+        else if (res && res.error === "wrong-passcode") {
+          forgetTeacherPasscode();
+          live.signInError = "That passcode didn't work. Check it matches the one in your Google script.";
+        }
+        return callBackend({ action: "liveState" });
+      })
+      : callBackend({ action: "liveState" });
+    request.then(function (res) {
+      if (!res || !res.ok) throw new Error("bad reply");
+      live.remote = res;
+      live.error = "";
+      if (!res.running) live.teacherIndex = null;
+    }).catch(function () {
+      live.error = "Couldn't reach the class service. Retrying…";
+    }).then(function () {
+      live.checked = true;
+      renderLiveIfChanged();
+      scheduleLivePoll();
+    });
+  }
+
+  function forgetTeacherPasscode() {
+    state.teacher.passcode = "";
+    writeSetting("hebrewClass.teacherPasscode", "");
+  }
+
+  // Re-render only when what's shown changes, so a half-typed email isn't wiped.
+  function renderLiveIfChanged() {
+    if (state.route.view !== "lesson" || state.route.tab !== "live") return;
+    if (liveKey() !== live.shownKey) render();
+  }
+
+  function liveKey() {
+    var r = live.remote || {};
+    return [live.checked, live.error, r.running, r.lessonId, r.sessionId, liveIndex(), live.joinedSession,
+      isLiveTeacher(), live.signInError, live.attendees.map(function (a) { return a.email; }).join(",")].join("|");
+  }
+
+  function liveIndex() {
+    if (live.teacherIndex !== null && isLiveTeacher()) return live.teacherIndex;
+    return live.remote && live.remote.running ? live.remote.index : 0;
+  }
+
+  function moveLive(step) {
+    var lesson = findLesson(state.route.lessonId);
+    if (!lesson || !isLiveTeacher() || !liveHere(lesson)) return;
+    var count = cardList(lesson).length;
+    var next = Math.max(0, Math.min(count - 1, liveIndex() + step));
+    if (next === liveIndex()) return;
+    setLiveIndex(next);
+  }
+
+  function setLiveIndex(index) {
+    live.teacherIndex = index;
+    render();
+    live.seq = Math.max(Date.now(), live.seq + 1); // strictly increasing, even for quick key presses
+    callBackend({ action: "liveSet", passcode: state.teacher.passcode, index: index, seq: live.seq }).then(function (res) {
+      if (res && res.error === "wrong-passcode") { forgetTeacherPasscode(); render(); }
+    }, function () {
+      live.error = "That change may not have reached the students. Check your connection.";
+      render();
+    });
+  }
+
+  function startLiveClass(lesson) {
+    live.busy = true;
+    render();
+    callBackend({ action: "liveStart", passcode: state.teacher.passcode, lessonId: lesson.id }).then(function (res) {
+      if (res && res.ok) {
+        live.remote = res;
+        live.teacherIndex = 0;
+        live.attendees = [];
+        live.error = "";
+      } else if (res && res.error === "wrong-passcode") {
+        forgetTeacherPasscode();
+        live.error = "That passcode didn't work. Check it matches the one in your Google script.";
+      } else {
+        live.error = "Couldn't start the class. Try again.";
+      }
+    }, function () {
+      live.error = "Couldn't reach the class service. Check your connection and try again.";
+    }).then(function () {
+      live.busy = false;
+      render();
+      scheduleLivePoll();
+    });
+  }
+
+  function endLiveClass() {
+    if (!window.confirm("End the live class for everyone?")) return;
+    live.busy = true;
+    render();
+    callBackend({ action: "liveEnd", passcode: state.teacher.passcode }).then(function (res) {
+      if (res && res.ok) {
+        live.remote = { running: false };
+        live.teacherIndex = null;
+        live.attendees = [];
+      }
+    }, function () {
+      live.error = "Couldn't end the class. Try again.";
+    }).then(function () {
+      live.busy = false;
+      render();
+    });
+  }
+
+  function joinLiveClass(email) {
+    live.joining = true;
+    live.joinError = "";
+    render();
+    callBackend({ action: "liveJoin", email: email }).then(function (res) {
+      if (res && res.ok) {
+        live.remote = res;
+        live.joinedSession = res.sessionId;
+        live.joinedThisVisit = true;
+        live.email = email;
+        writeSetting("hebrewClass.liveEmail", email);
+        writeSetting("hebrewClass.liveSession", res.sessionId);
+      } else if (res && res.error === "not-live") {
+        live.remote = { running: false };
+        live.joinError = "The class isn't live right now.";
+      } else if (res && res.error === "bad-email") {
+        live.joinError = "That doesn't look like an email address.";
+      } else {
+        live.joinError = "Couldn't join. Try again.";
+      }
+    }, function () {
+      live.joinError = "Couldn't reach the class service. Check your connection and try again.";
+    }).then(function () {
+      live.joining = false;
+      render();
+      scheduleLivePoll();
+    });
+  }
+
+  function renderLive(lesson) {
+    live.shownKey = liveKey();
+
+    if (!config.resultsUrl) {
+      return el("p", { class: "notice", text: "The live class needs the Google script connected (see README.md)." });
+    }
+    var parts = [el("div", { class: "toolbar no-print", style: "margin-bottom:16px" }, [niqqudToggle()])];
+    if (live.error) parts.push(el("p", { class: "notice error", text: live.error }));
+    parts.push(isLiveTeacher() ? renderLiveTeacher(lesson) : renderLiveStudent(lesson));
+    return el("div", { class: "live-view" }, parts);
+  }
+
+  function liveCard(lesson, index, teacher) {
+    var list = cardList(lesson);
+    if (!list.length) return [el("p", { class: "notice", text: "This lesson has no phrases yet." })];
+    index = Math.min(index, list.length - 1);
+    var pct = Math.round(((index + 1) / list.length) * 100);
+    var card = wordCard(list[index]);
+    var nodes = [
+      el("div", { class: "progress-bar", "aria-hidden": "true" }, [el("span", { style: "width:" + pct + "%" })]),
+      card
+    ];
+    if (teacher) {
+      addSwipe(card, moveLive);
+      nodes.push(el("div", { class: "card-nav" }, [
+        el("button", { class: "btn", type: "button", disabled: index === 0, onclick: function () { moveLive(-1); }, text: "← Previous" }),
+        el("span", { class: "card-count", "aria-live": "polite", text: (index + 1) + " / " + list.length }),
+        el("button", { class: "btn primary", type: "button", disabled: index === list.length - 1, onclick: function () { moveLive(1); }, text: "Next word →" })
+      ]));
+    } else {
+      nodes.push(el("p", { class: "live-follow", "aria-live": "polite" }, [
+        el("span", { class: "live-dot on", "aria-hidden": "true" }),
+        "Following your teacher · " + (index + 1) + " / " + list.length
+      ]));
+    }
+    return nodes;
+  }
+
+  function renderLiveTeacher(lesson) {
+    var r = live.remote || {};
+    var wrap = el("div");
+    if (!live.checked) {
+      wrap.appendChild(el("p", { class: "notice", text: "Checking whether a class is live…" }));
+      return wrap;
+    }
+    if (!liveHere(lesson)) {
+      var other = r.running && findLesson(r.lessonId);
+      wrap.appendChild(el("div", { class: "card live-start" }, [
+        el("h2", { text: "Teach this lesson live" }),
+        el("p", { text: "Start the class, then share this page's link with your students. They join with their email and see whichever word you're on, a few seconds after you move." }),
+        r.running ? el("p", { class: "notice", text: "A live class is already running for “" + (other ? other.title : r.lessonId) + "”. Starting here ends it." }) : null,
+        el("div", { class: "actions" }, [
+          el("button", { class: "btn primary", type: "button", disabled: live.busy, onclick: function () { startLiveClass(lesson); }, text: live.busy ? "Starting…" : "Start live class" })
+        ])
+      ]));
+      wrap.appendChild(teacherSignOut());
+      return wrap;
+    }
+
+    liveCard(lesson, liveIndex(), true).forEach(function (n) { wrap.appendChild(n); });
+    var people = live.attendees;
+    wrap.appendChild(el("div", { class: "card live-panel" }, [
+      el("div", { class: "live-panel-head" }, [
+        el("h2", null, [el("span", { class: "live-dot on", "aria-hidden": "true" }), "Live now"]),
+        el("button", { class: "btn", type: "button", disabled: live.busy, onclick: endLiveClass, text: "End class" })
+      ]),
+      el("p", { class: "muted", text: people.length ? people.length + (people.length === 1 ? " student has" : " students have") + " joined:" : "No students have joined yet. Share this page's link with them." }),
+      people.length ? el("ul", { class: "live-people" }, people.map(function (p) {
+        return el("li", { text: p.email });
+      })) : null,
+      el("p", { class: "hint", text: "Use the ← → arrow keys or the buttons to move. Students' screens follow within a few seconds." })
+    ]));
+    return wrap;
+  }
+
+  function teacherSignOut() {
+    return el("p", { class: "hint" }, [
+      "You're signed in as the teacher on this browser. ",
+      el("button", { class: "linklike", type: "button", text: "Sign out", onclick: function () { forgetTeacherPasscode(); render(); } })
+    ]);
+  }
+
+  function renderLiveStudent(lesson) {
+    var r = live.remote || {};
+    var wrap = el("div");
+    if (!live.checked) {
+      wrap.appendChild(el("p", { class: "notice", text: "Checking whether the class is live…" }));
+    } else if (!r.running) {
+      wrap.appendChild(el("div", { class: "card live-start" }, [
+        el("h2", { text: live.joinedThisVisit ? "The live class has ended" : "The class isn't live right now" }),
+        el("p", { text: live.joinedThisVisit ? "Thanks for joining! You can keep practising with Word by word or the quiz." : "When your teacher starts the class, you can join here. This page checks every few seconds, so you can leave it open." })
+      ]));
+    } else if (r.lessonId !== lesson.id) {
+      var other = findLesson(r.lessonId);
+      wrap.appendChild(el("div", { class: "card live-start" }, [
+        el("h2", { text: "The live class is on another lesson" }),
+        other ? el("a", { class: "btn primary", href: lessonUrl(other, "live"), text: "Go to “" + other.title + "”" }) : el("p", { text: "Reload the page to see the newest lessons." })
+      ]));
+    } else if (live.joinedSession !== r.sessionId) {
+      wrap.appendChild(joinForm());
+    } else {
+      live.joinedThisVisit = true;
+      liveCard(lesson, liveIndex(), false).forEach(function (n) { wrap.appendChild(n); });
+      wrap.appendChild(el("p", { class: "hint live-signed", text: "Joined as " + live.email }));
+      return wrap;
+    }
+    wrap.appendChild(teacherSignIn());
+    return wrap;
+  }
+
+  function joinForm() {
+    var input = el("input", {
+      type: "email",
+      id: "live-email",
+      required: true,
+      autocomplete: "email",
+      value: live.email,
+      oninput: function (e) { live.email = e.target.value; }
+    });
+    return el("form", {
+      class: "card live-start",
+      onsubmit: function (e) {
+        e.preventDefault();
+        var email = input.value.trim();
+        if (email && !live.joining) joinLiveClass(email);
+      }
+    }, [
+      el("h2", null, [el("span", { class: "live-dot on", "aria-hidden": "true" }), "The class is live"]),
+      el("p", { text: "Enter your email to join. You'll see the word your teacher is on." }),
+      el("div", { class: "field" }, [el("label", { for: "live-email", text: "Your email" }), input]),
+      live.joinError ? el("p", { class: "notice error", text: live.joinError }) : null,
+      el("button", { class: "btn primary", type: "submit", disabled: live.joining, text: live.joining ? "Joining…" : "Join the class" })
+    ]);
+  }
+
+  function teacherSignIn() {
+    var input = el("input", { type: "password", required: true, autocomplete: "current-password", id: "live-passcode" });
+    return el("details", { class: "teacher-signin", open: !!live.signInError }, [
+      el("summary", { text: "Teacher? Sign in to run the class" }),
+      live.signInError ? el("p", { class: "notice error", text: live.signInError }) : null,
+      el("form", {
+        onsubmit: function (e) {
+          e.preventDefault();
+          var code = input.value.trim();
+          if (!code) return;
+          state.teacher.passcode = code;
+          writeSetting("hebrewClass.teacherPasscode", code);
+          live.signInError = "";
+          live.checked = false;
+          render();
+          startLivePolling();
+        }
+      }, [
+        el("div", { class: "field" }, [el("label", { for: "live-passcode", text: "Teacher passcode" }), input]),
+        el("button", { class: "btn", type: "submit", text: "Sign in" })
+      ])
+    ]);
+  }
+
   /* ---------- Teacher dashboard ---------- */
 
   function loadResults() {
@@ -1143,10 +1510,11 @@
   window.addEventListener("hashchange", onRouteChange);
   window.addEventListener("resize", scalePage);
   document.addEventListener("keydown", function (e) {
-    if (state.route.view !== "lesson" || state.route.tab !== "cards") return;
+    if (state.route.view !== "lesson" || (state.route.tab !== "cards" && state.route.tab !== "live")) return;
     if (e.altKey || e.ctrlKey || e.metaKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
-    if (e.key === "ArrowRight") { e.preventDefault(); moveCard(1); }
-    else if (e.key === "ArrowLeft") { e.preventDefault(); moveCard(-1); }
+    var move = state.route.tab === "live" ? moveLive : moveCard;
+    if (e.key === "ArrowRight") { e.preventDefault(); move(1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); move(-1); }
   });
   window.addEventListener("beforeprint", fitSheet);
 
@@ -1156,6 +1524,7 @@
       state.route = parseHash();
       if (state.route.view === "teacher") loadResults();
       render();
+      startLivePolling();
       if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitSheet);
     });
   });

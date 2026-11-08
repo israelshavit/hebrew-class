@@ -22,4 +22,5 @@ Check Hebrew carefully: gender agreement (e.g. רוֹצָה, not רוֹצַת), 
 - Colours and radii use the CSS variables on `:root`. The printed sheet keeps the original Word document's look (blue header, light-blue section rows, Arial).
 - `localStorage` only holds per-browser conveniences (student name, niqqud toggle).
 - Quiz results go to the Google Apps Script URL in `config.js` (`results-sheet/Code.gs`), which stores them in the teacher's Google Sheet. The Teacher page (`#/teacher`) reads them back with a passcode and polls every 30 seconds. All calls are text/plain POSTs, because Apps Script doesn't answer CORS preflights.
+- The Live class tab uses the same script: the teacher's current word is kept in the script cache (copied to script properties) and students poll it every few seconds; joins go to the Attendance sheet. Any `Code.gs` change needs the teacher to redeploy a new version.
 - Never commit the real teacher passcode; `Code.gs` in the repo keeps the `change-me` placeholder.

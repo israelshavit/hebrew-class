@@ -111,6 +111,30 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
   margin-bottom: -1px;
 }
 .tab.active { color: var(--accent-dark); border-bottom-color: var(--accent); }
+.tabs { overflow-x: auto; scrollbar-width: none; }
+.tab { white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+
+/* Live class */
+.live-dot { display: none; width: 9px; height: 9px; border-radius: 50%; background: var(--bad); flex: none; }
+.live-dot.on { display: inline-block; animation: live-pulse 1.6s ease-in-out infinite; }
+@keyframes live-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .live-dot.on { animation: none; } }
+.live-start h2, .live-panel h2 { display: flex; align-items: center; gap: 8px; font-size: 1.2rem; margin: 0 0 8px; }
+.live-start p { margin: 0 0 12px; }
+.live-follow {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin: 16px 0 0; color: var(--muted); font-weight: 600;
+}
+.live-signed { text-align: center; margin: 4px 0 0; }
+.live-panel { margin-top: 16px; }
+.live-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.live-panel-head h2 { margin: 0; }
+.live-people { margin: 8px 0 12px; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+.live-people li { padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); font-size: .9rem; overflow-wrap: anywhere; }
+.teacher-signin { margin-top: 24px; color: var(--muted); }
+.teacher-signin summary { cursor: pointer; font-size: .9rem; }
+.teacher-signin form { margin-top: 8px; }
+.linklike { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-dark); text-decoration: underline; cursor: pointer; }
 
 .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .toggle { display: inline-flex; align-items: center; gap: 8px; margin-right: auto; cursor: pointer; }
