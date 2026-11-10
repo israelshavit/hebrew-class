@@ -446,7 +446,7 @@
         tbody.appendChild(el("tr", null, [
           el("td", { text: row.en }),
           el("td", { class: "tr" }, formSpans(row, function (f) {
-            return f.tr + (f.g ? " (" + f.g + ")" : "");
+            return f.tr + (f.g ? " (" + f.g + ")" : "");
           })),
           el("td", { class: "he", lang: "he", dir: "rtl" }, formSpans(row, function (f) {
             return heb(f.he);

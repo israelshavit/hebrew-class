@@ -187,7 +187,9 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
   color: #2d3748;
   white-space: pre-line;
 }
-.sheet .form { white-space: nowrap; }
+/* A form moves to its own line when it doesn't fit beside the other one,
+   and wraps inside the cell only when it is longer than the cell. */
+.sheet .form { display: inline-block; max-width: 100%; }
 .sheet td.he { position: relative; }
 .sheet .speakable { cursor: pointer; }
 .sheet .speakable:hover { color: var(--accent-dark); }
