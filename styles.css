@@ -240,6 +240,7 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 }
 .sheet .sep { color: #718096; }
 .sheet-notes { margin: .8em 0 0; font-size: .9em; color: #2d3748; }
+.sheet-notes a { color: var(--accent-dark); overflow-wrap: anywhere; }
 
 /* Word by word */
 .word-card {

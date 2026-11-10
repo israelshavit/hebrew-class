@@ -482,7 +482,11 @@
         : [lesson.title, pageLabel]).filter(Boolean).join(" · ") }),
       table,
       last && lesson.notes ? el("p", { class: "sheet-notes" }, [el("strong", { text: "Notes: " }), lesson.notes]) : null,
-      last && lesson.video ? el("p", { class: "sheet-notes" }, [el("strong", { text: "Video: " }), (lesson.videoTitle ? lesson.videoTitle + " – " : "") + lesson.video]) : null
+      last && lesson.video ? el("p", { class: "sheet-notes" }, [
+        el("strong", { text: "Video: " }),
+        // The address stays visible so it still works on paper; in a saved PDF it is clickable.
+        el("a", { href: lesson.video, target: "_blank", rel: "noopener", text: (lesson.videoTitle ? lesson.videoTitle + " – " : "") + lesson.video })
+      ]) : null
     ]);
   }
 
