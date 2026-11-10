@@ -557,7 +557,8 @@
     ]);
   }
 
-  // One phrase as a big card: Hebrew (both forms when there are two), transliteration, English.
+  // One phrase as a big card: section at the top, then English, then Hebrew
+  // (both forms when there are two) with transliteration.
   function wordCard(item) {
     var row = item.row;
     var forms = row.forms.map(function (f) {
@@ -571,8 +572,10 @@
 
     return el("div", { class: "card word-card" }, [
       el("p", { class: "card-section", text: item.sectionNo + ". " + item.section.title }),
-      el("div", { class: "card-forms" + (forms.length > 1 ? " two" : "") }, forms),
-      el("p", { class: "card-en", text: row.en.replace(/\s*\((to )?m\/f\)/, "") })
+      el("div", { class: "card-body" }, [
+        el("p", { class: "card-en", text: row.en.replace(/\s*\((to )?m\/f\)/, "") }),
+        el("div", { class: "card-forms" + (forms.length > 1 ? " two" : "") }, forms)
+      ])
     ]);
   }
 
