@@ -101,6 +101,7 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 /* Lesson header */
 .back { display: inline-block; margin-bottom: 12px; text-decoration: none; }
 .lesson-head .lesson-date { margin: 0 0 16px; }
+.lesson-head .lesson-video { margin: -10px 0 16px; font-size: .9rem; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
 .tab {
   padding: 10px 16px;
@@ -146,6 +147,7 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
   margin: 0 auto;
   overflow: hidden;
 }
+.page-frame + .page-frame { margin-top: 20px; }
 .page {
   width: 794px;
   height: 1123px;
@@ -178,6 +180,12 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
   color: #2b6cb0;
   font-weight: 700;
   text-align: center;
+}
+.sheet tr.explain td {
+  font-size: .86em;
+  line-height: 1.3;
+  color: #2d3748;
+  white-space: pre-line;
 }
 .sheet .form { white-space: nowrap; }
 .sheet td.he { position: relative; }
@@ -258,6 +266,18 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .04em;
+}
+.card-explain {
+  margin: 0;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: .95rem;
+  line-height: 1.5;
+  text-align: left;
+  white-space: pre-line;
 }
 .card-forms { display: grid; gap: 20px; width: 100%; }
 .card-forms.two { grid-template-columns: 1fr 1fr; }
@@ -439,6 +459,7 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
   .no-print, .topbar { display: none !important; }
   main { padding: 0; max-width: none; }
   .page-frame { max-width: none; height: auto !important; overflow: visible; }
+  .page-frame + .page-frame { margin-top: 0; break-before: page; }
   .page {
     transform: none !important;
     box-shadow: none;

@@ -10,6 +10,9 @@
   var PAGE_PAD = 34;
   var MAX_FONT = 15;
   var MIN_FONT = 7;
+  // Below this the sheet moves onto more pages (up to MAX_PAGES) instead of shrinking further.
+  var READABLE_FONT = 10;
+  var MAX_PAGES = 3;
 
   var CHOICE_QUESTIONS = 10;
   var MATCH_ROUNDS = 2;
@@ -67,6 +70,7 @@
     var sections = (raw.sections || []).map(function (section, si) {
       return {
         title: section.title,
+        explanation: section.explanation || "",
         rows: (section.rows || []).map(function (r, ri) {
           var row = { id: si + "-" + ri, en: r[0], forms: [] };
           var tr = r[1];
@@ -94,6 +98,7 @@
       title: raw.title || "Untitled lesson",
       subtitle: raw.subtitle || "",
       video: raw.video || "",
+      videoTitle: raw.videoTitle || "",
       notes: raw.notes || "",
       sections: sections,
       forms: forms
@@ -110,7 +115,11 @@
       script.onload = script.onerror = function (event) {
         if (event.type === "error") state.loadErrors.push(name);
         pending -= 1;
-        if (pending === 0) done();
+        if (pending === 0) {
+          // Scripts can finish in any order; newest lesson first.
+          lessons.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+          done();
+        }
       };
       document.body.appendChild(script);
     });
@@ -373,6 +382,10 @@
       el("a", { class: "back", href: "#/", text: "← All lessons" }),
       el("h1", { text: lesson.title }),
       el("p", { class: "lesson-date", text: formatDate(lesson.date) }),
+      lesson.video ? el("p", { class: "lesson-video" }, [
+        "Video: ",
+        el("a", { href: lesson.video, target: "_blank", rel: "noopener", text: lesson.videoTitle || lesson.video })
+      ]) : null,
       el("nav", { class: "tabs", "aria-label": "Lesson" }, [
         el("a", { class: "tab" + (tab === "sheet" ? " active" : ""), href: lessonUrl(lesson, "sheet"), "aria-current": tab === "sheet" ? "page" : null, text: "Lesson sheet" }),
         el("a", { class: "tab" + (tab === "cards" ? " active" : ""), href: lessonUrl(lesson, "cards"), "aria-current": tab === "cards" ? "page" : null, text: "Word by word" }),
@@ -407,20 +420,28 @@
   function renderSheetTab(lesson) {
     var toolbar = el("div", { class: "toolbar no-print" }, [
       niqqudToggle(),
-      lesson.video ? el("a", { class: "btn", href: lesson.video, target: "_blank", rel: "noopener", text: "Watch the video" }) : null,
       el("button", { class: "btn primary", type: "button", onclick: function () { window.print(); }, text: "Print or save as PDF" })
     ]);
     var hint = el("p", { class: "hint no-print", text: "To download the sheet, press Print and choose “Save as PDF” as the printer." });
-    var page = el("div", { class: "page", id: "sheet-page" }, [buildSheet(lesson)]);
-    return el("div", null, [toolbar, hint, el("div", { class: "page-frame", id: "page-frame" }, [page])]);
+    // fitSheet fills this with one or more pages once it is on screen.
+    var pages = el("div", { class: "sheet-pages", id: "sheet-pages" });
+    pages.lesson = lesson;
+    return el("div", null, [toolbar, hint, pages]);
   }
 
-  function buildSheet(lesson) {
+  // One printed page holding the sections numbered from..to-1 (0-based).
+  function buildSheet(lesson, from, to, pageNo, pageCount) {
     var tbody = el("tbody");
-    lesson.sections.forEach(function (section, si) {
+    lesson.sections.slice(from, to).forEach(function (section, i) {
+      var si = from + i;
       tbody.appendChild(el("tr", { class: "section" }, [
         el("td", { colspan: "3", text: (si + 1) + ". " + section.title })
       ]));
+      if (section.explanation) {
+        tbody.appendChild(el("tr", { class: "explain" }, [
+          el("td", { colspan: "3", text: heb(section.explanation) })
+        ]));
+      }
       section.rows.forEach(function (row) {
         tbody.appendChild(el("tr", null, [
           el("td", { text: row.en }),
@@ -451,11 +472,17 @@
       tbody
     ]);
 
+    var first = pageNo === 1;
+    var last = pageNo === pageCount;
+    var pageLabel = pageCount > 1 ? "Page " + pageNo + " of " + pageCount : "";
     return el("div", { class: "sheet" }, [
-      el("h2", { class: "sheet-title", text: lesson.title }),
-      el("p", { class: "sheet-subtitle", text: [lesson.subtitle, formatDate(lesson.date)].filter(Boolean).join(" · ") }),
+      first ? el("h2", { class: "sheet-title", text: lesson.title }) : null,
+      el("p", { class: "sheet-subtitle", text: (first
+        ? [lesson.subtitle, formatDate(lesson.date), pageLabel]
+        : [lesson.title, pageLabel]).filter(Boolean).join(" · ") }),
       table,
-      lesson.notes ? el("p", { class: "sheet-notes" }, [el("strong", { text: "Notes: " }), lesson.notes]) : null
+      last && lesson.notes ? el("p", { class: "sheet-notes" }, [el("strong", { text: "Notes: " }), lesson.notes]) : null,
+      last && lesson.video ? el("p", { class: "sheet-notes" }, [el("strong", { text: "Video: " }), (lesson.videoTitle ? lesson.videoTitle + " – " : "") + lesson.video]) : null
     ]);
   }
 
@@ -475,28 +502,74 @@
     return nodes;
   }
 
-  // Pick the largest font size at which the sheet fits on one page.
+  // Lay the sheet out on as few pages as keep the font readable: one page if it
+  // fits at READABLE_FONT or more, otherwise split the sections between pages
+  // (never inside a section) and pick the split with the largest font.
   function fitSheet() {
-    var page = document.getElementById("sheet-page");
-    if (!page) return;
-    var sheet = page.firstChild;
-    var maxHeight = PAGE_H - 2 * PAGE_PAD;
-    var size = MAX_FONT;
-    sheet.style.fontSize = size + "px";
-    while (sheet.offsetHeight > maxHeight && size > MIN_FONT) {
-      size -= 0.25;
-      sheet.style.fontSize = size + "px";
+    var holder = document.getElementById("sheet-pages");
+    if (!holder || !holder.lesson) return;
+    var lesson = holder.lesson;
+    var n = lesson.sections.length;
+    var best = null;
+    for (var count = 1; count <= Math.min(MAX_PAGES, Math.max(1, n)); count++) {
+      splits(n, count).forEach(function (cuts) {
+        var pages = layoutPages(holder, lesson, cuts);
+        var size = Math.min.apply(null, pages.map(fitPage));
+        if (!best || size > best.size) best = { cuts: cuts, size: size };
+      });
+      if (best.size >= READABLE_FONT) break;
     }
+    // Same font size on every page, so the pages look alike.
+    layoutPages(holder, lesson, best.cuts).forEach(function (page) {
+      page.firstChild.style.fontSize = best.size + "px";
+    });
     scalePage();
   }
 
+  // Every way to cut n sections into count non-empty runs, as lists of start indexes.
+  function splits(n, count) {
+    if (count === 1) return [[0]];
+    var out = [];
+    (function pick(cuts, from, left) {
+      if (left === 0) { out.push(cuts); return; }
+      for (var i = from; i <= n - left; i++) pick(cuts.concat([i]), i + 1, left - 1);
+    })([0], 1, count - 1);
+    return out;
+  }
+
+  function layoutPages(holder, lesson, cuts) {
+    holder.textContent = "";
+    var pages = cuts.map(function (from, i) {
+      var to = i + 1 < cuts.length ? cuts[i + 1] : lesson.sections.length;
+      var page = el("div", { class: "page" }, [buildSheet(lesson, from, to, i + 1, cuts.length)]);
+      holder.appendChild(el("div", { class: "page-frame" }, [page]));
+      return page;
+    });
+    return pages;
+  }
+
+  // Largest font size (in 0.25px steps) at which this page's sheet fits.
+  function fitPage(page) {
+    var sheet = page.firstChild;
+    var maxHeight = PAGE_H - 2 * PAGE_PAD;
+    var lo = MIN_FONT * 4;
+    var hi = MAX_FONT * 4;
+    while (lo < hi) {
+      var mid = Math.ceil((lo + hi) / 2);
+      sheet.style.fontSize = mid / 4 + "px";
+      if (sheet.offsetHeight <= maxHeight) lo = mid; else hi = mid - 1;
+    }
+    sheet.style.fontSize = lo / 4 + "px";
+    return lo / 4;
+  }
+
   function scalePage() {
-    var frame = document.getElementById("page-frame");
-    var page = document.getElementById("sheet-page");
-    if (!frame || !page) return;
-    var scale = Math.min(1, frame.clientWidth / PAGE_W);
-    page.style.transform = "scale(" + scale + ")";
-    frame.style.height = Math.ceil(PAGE_H * scale) + "px";
+    var frames = document.querySelectorAll("#sheet-pages .page-frame");
+    Array.prototype.forEach.call(frames, function (frame) {
+      var scale = Math.min(1, frame.clientWidth / PAGE_W);
+      frame.firstChild.style.transform = "scale(" + scale + ")";
+      frame.style.height = Math.ceil(PAGE_H * scale) + "px";
+    });
   }
 
   /* ---------- Word by word ---------- */
@@ -572,6 +645,7 @@
 
     return el("div", { class: "card word-card" }, [
       el("p", { class: "card-section", text: item.sectionNo + ". " + item.section.title }),
+      item.section.explanation ? el("p", { class: "card-explain", text: heb(item.section.explanation) }) : null,
       el("div", { class: "card-body" }, [
         el("p", { class: "card-en", text: row.en.replace(/\s*\((to )?m\/f\)/, "") }),
         el("div", { class: "card-forms" + (forms.length > 1 ? " two" : "") }, forms)

@@ -8,7 +8,7 @@ The teacher gives Claude a YouTube link, a word list, or the Word/PDF they made.
 
 1. Writes `lessons/YYYY-MM-DD-topic.js` (class date, short topic slug) in the format of the existing lesson files, with niqqud on all Hebrew.
 2. Adds it to `lessons/index.js`.
-3. Checks the sheet still fits on one page at a readable size (the font shrinks to fit; below about 10px, suggest trimming or splitting) and that the quiz runs.
+3. Checks the sheet is readable (the font shrinks to fit one page; below 10px it moves onto two or three pages, so a long lesson may need trimming or splitting) and that the quiz runs.
 4. Shows the teacher the result before committing and pushing.
 
 Claude can't watch videos. If a YouTube page or transcript can't be read, ask for the word list.

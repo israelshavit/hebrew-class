@@ -2,7 +2,7 @@
 
 A small website for a weekly Hebrew class. Each lesson has:
 
-- **Lesson sheet**: a one-page table (English, transliteration, Hebrew) that students print or save as a PDF. The font size shrinks automatically so it always fits on one A4 page.
+- **Lesson sheet**: a printable table (English, transliteration, Hebrew) that students print or save as a PDF. The font size shrinks to fit one A4 page; if that would make it too small to read, the sheet moves onto two (or three) pages, splitting between sections.
 - **Word by word**: one phrase per screen with a listen button, for practising alone.
 - **Quiz**: English → Hebrew multiple choice, then matching rounds, built from that lesson's phrases. Scores can be sent to the teacher's Google Sheet.
 - **Live class**: the teacher steps through the words during an online class and every student who joined sees the same word.
@@ -14,6 +14,7 @@ There is no build step. Open `index.html` in a browser to try it locally.
 1. Copy a file in `lessons/` and name it `YYYY-MM-DD-topic.js`.
 2. Fill in its rows. A row is `["English", "Transliteration", "Hebrew"]`. For male/female forms use
    `["English (m/f)", ["translit m", "translit f"], ["Hebrew m", "Hebrew f"]]`; write `(to m/f)` when the forms depend on who you're talking to.
+   A section can have an `explanation` (shown above its phrases on the sheet and on each word card). Set `video` (and `videoTitle`) to link the lesson's video.
 3. Add the file name (without `.js`) to `lessons/index.js`.
 4. Commit and push. GitHub Pages updates the site in a minute or two.
 
