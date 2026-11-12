@@ -32,7 +32,8 @@
     niqqud: readSetting("hebrewClass.niqqud", "1") !== "0",
     student: signedInStudent,          // { name, token } once signed in; token is empty without a PIN
     studentName: signedInStudent ? signedInStudent.name : "",
-    auth: { busy: false, error: "" },
+    // forgot: the "Forgot your PIN?" steps while open; choose: choosing a PIN after a temporary one
+    auth: { busy: false, error: "", forgot: null, choose: null },
     quiz: null,       // the quiz being taken; null shows the list of quizzes
     quizDone: {},     // best score per "lessonId|quiz number" since the page was opened
     cards: null,
@@ -336,6 +337,7 @@
     if (parts[0] === "study") return { view: "study", tab: parts[1] === "say" ? "say" : "word" };
     if (parts[0] === "suggestions") return { view: "suggestions" };
     if (parts[0] === "progress") return { view: "progress" };
+    if (parts[0] === "share") return { view: "share" };
     if (parts[0] === "lesson" && parts[1]) {
       return {
         view: "lesson",
@@ -351,6 +353,7 @@
     if (state.quiz && state.quiz.lessonId !== state.route.lessonId) state.quiz = null;
     if (state.cards && state.cards.lessonId !== state.route.lessonId) state.cards = null;
     stopListening();
+    if (clearPrint) clearPrint(); // a phone may never say the report finished printing
     loadForRoute();
     render();
     window.scrollTo(0, 0);
@@ -372,7 +375,7 @@
 
   /* ---------- Rendering ---------- */
 
-  var PAGE_TITLES = { teacher: "Teacher dashboard", study: "Self study", suggestions: "Suggestions box", progress: "My progress" };
+  var PAGE_TITLES = { teacher: "Teacher dashboard", study: "Self study", suggestions: "Suggestions box", progress: "My progress", share: "Share" };
 
   function render() {
     var app = document.getElementById("app");
@@ -386,6 +389,7 @@
     else if (view === "study") app.appendChild(renderStudy());
     else if (view === "suggestions") app.appendChild(renderSuggestions());
     else if (view === "progress") app.appendChild(isTeacher() ? renderTeacher() : renderMyProgress());
+    else if (view === "share") app.appendChild(renderShare());
     else app.appendChild(renderHome());
     var title = lesson ? lesson.name : PAGE_TITLES[view];
     document.title = (title ? title + " · " : "") + "Hebrew Class";
@@ -439,14 +443,15 @@
 
   var SIGN_IN_ERRORS = {
     "bad-name": "Please enter your name.",
-    "bad-pin": "A PIN is 4 to 8 digits.",
+    "bad-pin": "A PIN is 4 to 8 digits (a temporary PIN from the email is 3).",
     "bad-email": "That email doesn't look right. You can also leave it empty.",
-    "pin-needed": "This name is protected by a PIN. Enter the PIN to sign in.",
-    "wrong-pin": "That PIN isn't right. Try again, or ask your teacher to reset it.",
-    "too-many-tries": "Too many wrong PINs. Wait 10 minutes and try again, or ask your teacher to reset it."
+    "pin-needed": "This name is protected by a PIN. Enter the PIN to sign in. Forgot it? Use “Forgot your PIN?” below.",
+    "wrong-pin": "That PIN isn't right. Try again, or use “Forgot your PIN?” below.",
+    "too-many-tries": "Too many wrong PINs. Wait 10 minutes and try again, or use “Forgot your PIN?” below."
   };
 
-  function signInStudent(name, pin, email) {
+  // newPin: the PIN a student chooses after signing in with a temporary one.
+  function signInStudent(name, pin, email, newPin) {
     var auth = state.auth;
     function done(error) {
       auth.busy = false;
@@ -458,10 +463,17 @@
     auth.busy = true;
     auth.error = "";
     render();
-    callBackend({ action: "signIn", name: name, pin: pin, email: email }).then(function (res) {
+    callBackend({ action: "signIn", name: name, pin: pin, email: email, newPin: newPin || "" }).then(function (res) {
       if (res && res.ok) {
+        auth.choose = null;
         setStudent(res.name || name, res.token);
         done();
+      } else if (res && res.error === "choose-pin") {
+        // The temporary PIN was right: now the student picks their own.
+        auth.choose = { name: name, pin: pin, email: email };
+        auth.busy = false;
+        auth.error = "";
+        render();
       } else if (res && res.error === "bad-request") {
         // A Google script from before sign-in existed: carry on with the name alone.
         setStudent(name, "");
@@ -474,12 +486,223 @@
     });
   }
 
+  /* ---------- Forgotten PIN: a code by email ---------- */
+
+  var FORGOT_ERRORS = {
+    "bad-name": "Please enter your name.",
+    "bad-pin": "A PIN is 4 to 8 digits.",
+    "not-found": "There's no student with that name. Check it's spelt the way you signed in.",
+    "no-pin": "That name has no PIN, so you can sign in with just your name.",
+    "no-email": "There's no email saved for that name, so we can't send a code. Ask your teacher to reset your PIN.",
+    "too-many-codes": "You've asked for several codes in the last hour. Use the newest one, wait an hour, or ask your teacher to reset your PIN.",
+    "mail-failed": "The email couldn't be sent. Ask your teacher to reset your PIN.",
+    "wrong-code": "That code isn't right. Check the newest email and try again.",
+    "code-expired": "That code has run out or was typed wrong too many times. Ask for a new code."
+  };
+
+  function forgotCall(body, onOk) {
+    var f = state.auth.forgot;
+    f.busy = true;
+    f.error = "";
+    render();
+    callBackend(body).then(function (res) {
+      f.busy = false;
+      if (res && res.ok) onOk(res);
+      else if (res && res.error === "no-email") f.step = "no-email"; // a code can't help: send them to the teacher
+      else if (res && res.error === "bad-request") f.error = "Resetting by email isn't switched on yet. Ask your teacher to reset your PIN.";
+      else f.error = FORGOT_ERRORS[res && res.error] || "Something went wrong. Try again, or ask your teacher to reset your PIN.";
+      render();
+    }, function () {
+      f.busy = false;
+      f.error = "Couldn't reach the class service. Check your connection and try again.";
+      render();
+    });
+  }
+
+  // Before offering anything, ask the script whether this name has an email
+  // saved, so a student without one goes straight to "Ask your teacher".
+  function checkForgotName(name) {
+    var f = state.auth.forgot;
+    f.name = name;
+    f.step = "checking";
+    f.error = "";
+    render();
+    function back(step, error) {
+      f.step = step;
+      f.error = error || "";
+      render();
+    }
+    callBackend({ action: "pinOptions", name: name }).then(function (res) {
+      if (state.auth.forgot !== f) return; // they went back meanwhile
+      if (res && res.ok) {
+        f.name = res.name || name;
+        f.sentTo = res.sentTo || "";
+        if (!res.hasPin) back("name", FORGOT_ERRORS["no-pin"]);
+        else back(res.hasEmail ? "email" : "no-email");
+      } else if (res && res.error === "bad-request") {
+        // A Google script from before this check: ask for the code straight away.
+        f.legacy = true;
+        back("name");
+      } else {
+        back("name", FORGOT_ERRORS[res && res.error] || "Something went wrong. Try again, or ask your teacher to reset your PIN.");
+      }
+    }, function () {
+      if (state.auth.forgot === f) back("name", "Couldn't reach the class service. Check your connection and try again.");
+    });
+  }
+
+  function renderForgotPin() {
+    var auth = state.auth;
+    var f = auth.forgot;
+    function back() { auth.forgot = null; render(); }
+    function sendCode(name) {
+      f.name = name;
+      f.code = "";
+      forgotCall({ action: "pinCode", name: name }, function (res) {
+        f.step = "code";
+        f.sentTo = res.sentTo || "your email";
+      });
+    }
+    var error = f.error ? el("p", { class: "notice error", role: "alert", text: f.error }) : null;
+    var backButton = el("button", { class: "btn", type: "button", text: "Back to sign in", onclick: back });
+
+    if (f.step === "checking") {
+      return el("section", { class: "signin" }, [
+        el("h1", { text: "Forgot your PIN?" }),
+        el("div", { class: "card" }, [
+          el("p", { style: "margin-top:0", role: "status", text: "Checking how we can help " + f.name + "…" }),
+          el("div", { class: "actions" }, [backButton])
+        ])
+      ]);
+    }
+
+    if (f.step === "no-email") {
+      return el("section", { class: "signin" }, [
+        el("h1", { text: "Ask your teacher" }),
+        el("div", { class: "card" }, [
+          el("p", { style: "margin-top:0", text: "There's no email saved for " + f.name + ", so we can't send a code." }),
+          el("p", { text: "Ask your teacher to clear your PIN. Then sign in with just your name and type a new PIN. Your scores are kept." }),
+          el("p", { class: "hint", text: "Tip: when you sign in, add your email too. Next time you can reset your PIN yourself." }),
+          el("div", { class: "actions" }, [
+            el("button", { class: "btn primary", type: "button", text: "Back to sign in", onclick: back })
+          ])
+        ])
+      ]);
+    }
+
+    if (f.step === "email") {
+      return el("section", { class: "signin" }, [
+        el("h1", { text: "Forgot your PIN?" }),
+        el("div", { class: "card" }, [
+          el("p", { style: "margin-top:0", text: "We'll email a 6-digit code to " + f.sentTo + ", the address saved for " + f.name + ". With the code you choose a new PIN." }),
+          error,
+          el("div", { class: "actions" }, [
+            el("button", { class: "btn primary", type: "button", disabled: f.busy, text: f.busy ? "Sending…" : "Email me a code", onclick: function () { if (!f.busy) sendCode(f.name); } }),
+            backButton
+          ]),
+          el("p", { class: "hint", text: "Not your email, or no email arriving? Look in your spam folder, or ask your teacher." })
+        ])
+      ]);
+    }
+
+    if (f.step === "name") {
+      var nameInput = el("input", { type: "text", id: "forgot-name", required: true, maxlength: "60", autocomplete: "name", value: f.name || "" });
+      return el("section", { class: "signin" }, [
+        el("h1", { text: "Forgot your PIN?" }),
+        el("p", { class: "lede", text: "Type your name and we'll see how to help: a code by email, or your teacher." }),
+        el("form", { class: "card", onsubmit: function (e) {
+          e.preventDefault();
+          var name = nameInput.value.trim().replace(/\s+/g, " ");
+          if (!name || f.busy) return;
+          if (f.legacy) sendCode(name);
+          else checkForgotName(name);
+        } }, [
+          el("div", { class: "field" }, [
+            el("label", { for: "forgot-name", text: "Your name" }),
+            nameInput,
+            el("span", { class: "field-hint", text: "Exactly as you sign in." })
+          ]),
+          error,
+          el("div", { class: "actions" }, [
+            el("button", { class: "btn primary", type: "submit", disabled: f.busy, text: f.busy ? "Sending…" : f.legacy ? "Email me a code" : "Continue" }),
+            backButton
+          ])
+        ])
+      ]);
+    }
+
+    // What was typed survives the redraw after a wrong code.
+    var codeInput = el("input", { type: "text", id: "forgot-code", required: true, inputmode: "numeric", pattern: "[0-9 ]{6,7}", maxlength: "7", autocomplete: "one-time-code", value: f.code || "" });
+    var pinInput = el("input", { type: "password", id: "forgot-pin", required: true, inputmode: "numeric", pattern: "[0-9]{4,8}", maxlength: "8", autocomplete: "off", title: "4 to 8 digits", value: f.pin || "" });
+    return el("section", { class: "signin" }, [
+      el("h1", { text: "Choose a new PIN" }),
+      el("p", { class: "lede", text: "We sent a 6-digit code to " + f.sentTo + ". It works for 15 minutes. If it isn't there, look in your spam folder." }),
+      el("form", { class: "card", onsubmit: function (e) {
+        e.preventDefault();
+        var code = codeInput.value.replace(/\s+/g, "");
+        var pin = pinInput.value.trim();
+        if (!code || !pin || f.busy) return;
+        f.code = code;
+        f.pin = pin;
+        forgotCall({ action: "pinCodeReset", name: f.name, code: code, pin: pin }, function (res) {
+          auth.forgot = null;
+          auth.error = "";
+          setStudent(res.name || f.name, res.token);
+          writeSetting("hebrewClass.studentName", res.name || f.name);
+          loadForRoute();
+        });
+      } }, [
+        el("div", { class: "field" }, [el("label", { for: "forgot-code", text: "Code from the email" }), codeInput]),
+        el("div", { class: "field" }, [
+          el("label", { for: "forgot-pin", text: "New PIN" }),
+          pinInput,
+          el("span", { class: "field-hint", text: "4 to 8 digits. You'll use it to sign in from now on." })
+        ]),
+        error,
+        el("div", { class: "actions" }, [
+          el("button", { class: "btn primary", type: "submit", disabled: f.busy, text: f.busy ? "Saving…" : "Save PIN and sign in" }),
+          el("button", { class: "btn", type: "button", disabled: f.busy, text: "Send a new code", onclick: function () { sendCode(f.name); } }),
+          el("button", { class: "btn", type: "button", text: "Back to sign in", onclick: back })
+        ])
+      ])
+    ]);
+  }
+
+  // After signing in with the teacher's temporary PIN.
+  function renderChoosePin() {
+    var auth = state.auth;
+    var c = auth.choose;
+    var pinInput = el("input", { type: "password", id: "choose-pin", required: true, inputmode: "numeric", pattern: "[0-9]{4,8}", maxlength: "8", autocomplete: "off", title: "4 to 8 digits" });
+    return el("section", { class: "signin" }, [
+      el("h1", { text: "Choose your own PIN" }),
+      el("p", { class: "lede", text: "That's your temporary PIN. Now choose a PIN only you know." }),
+      el("form", { class: "card", onsubmit: function (e) {
+        e.preventDefault();
+        var newPin = pinInput.value.trim();
+        if (newPin && !auth.busy) signInStudent(c.name, c.pin, c.email, newPin);
+      } }, [
+        el("div", { class: "field" }, [
+          el("label", { for: "choose-pin", text: "New PIN" }),
+          pinInput,
+          el("span", { class: "field-hint", text: "4 to 8 digits. You'll use it to sign in from now on; the temporary PIN stops working." })
+        ]),
+        auth.error ? el("p", { class: "notice error", role: "alert", text: auth.error }) : null,
+        el("div", { class: "actions" }, [
+          el("button", { class: "btn primary", type: "submit", disabled: auth.busy, text: auth.busy ? "Saving…" : "Save PIN and sign in" }),
+          el("button", { class: "btn", type: "button", text: "Back to sign in", onclick: function () { auth.choose = null; auth.error = ""; render(); } })
+        ])
+      ])
+    ]);
+  }
+
   function renderSignIn() {
     var auth = state.auth;
     var t = state.teacher;
+    if (auth.forgot) return renderForgotPin();
+    if (auth.choose) return renderChoosePin();
     var nameInput = el("input", { type: "text", id: "signin-name", required: true, maxlength: "60", autocomplete: "name", value: readSetting("hebrewClass.studentName", "") });
     var emailInput = el("input", { type: "email", id: "signin-email", maxlength: "120", autocomplete: "email", value: readSetting("hebrewClass.liveEmail", "") });
-    var pinInput = el("input", { type: "password", id: "signin-pin", inputmode: "numeric", pattern: "[0-9]{4,8}", maxlength: "8", autocomplete: "off", title: "4 to 8 digits" });
+    var pinInput = el("input", { type: "password", id: "signin-pin", inputmode: "numeric", pattern: "[0-9]{3,8}", maxlength: "8", autocomplete: "off", title: "4 to 8 digits, or a 3-digit temporary PIN from your email" });
     var passInput = el("input", { type: "password", id: "signin-passcode", required: true, autocomplete: "current-password" });
 
     return el("section", { class: "signin" }, [
@@ -512,7 +735,17 @@
         el("div", { class: "field" }, [
           el("label", { for: "signin-pin", text: "PIN (optional)" }),
           pinInput,
-          el("span", { class: "field-hint", text: "Choose 4 digits and only you can see your progress report. You'll need it to sign in again." })
+          el("span", { class: "field-hint", text: "Choose 4 digits and only you can see your progress report. You'll need it to sign in again." }),
+          el("span", { class: "field-hint" }, [
+            el("button", { class: "linklike", type: "button", text: "Forgot your PIN?", onclick: function () {
+              auth.error = "";
+              var name = nameInput.value.trim().replace(/\s+/g, " ");
+              auth.forgot = { step: "name", name: name };
+              if (name) checkForgotName(name); // the name is already typed: check it straight away
+              else render();
+            } }),
+            document.createTextNode(" Get a code by email, or ask your teacher. Your scores are kept.")
+          ])
         ]),
         auth.error ? el("p", { class: "notice error", role: "alert", text: auth.error }) : null,
         el("div", { class: "actions" }, [el("button", { class: "btn primary", type: "submit", disabled: auth.busy, text: auth.busy ? "Signing in…" : "Sign in" })])
@@ -572,7 +805,8 @@
       link("#/suggestions", "Suggestions", view === "suggestions"),
       isTeacher()
         ? link("#/teacher", "Teacher", view === "teacher" || view === "progress")
-        : link("#/progress", "My progress", view === "progress")
+        : link("#/progress", "My progress", view === "progress"),
+      link("#/share", "Share", view === "share")
     ]));
     if (!isTeacher()) user.appendChild(el("span", { class: "topnav-name", text: state.student.name }));
     user.appendChild(el("button", { class: "topnav-out", type: "button", text: "Sign out", onclick: signOut }));
@@ -602,6 +836,44 @@
     });
     wrap.appendChild(list);
     return wrap;
+  }
+
+  /* ---------- Sharing the site ---------- */
+
+  var SHARE_TEXT = "Hebrew Class: the weekly lesson sheet, short quizzes and a Hebrew word of the day.";
+
+  function touchScreen() {
+    return !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+  }
+
+  function renderShare() {
+    var url = config.siteUrl || location.href.split("#")[0];
+    var message = SHARE_TEXT + " " + url;
+    var status = el("span", { class: "share-status", role: "status" });
+    function copyLink() {
+      function failed() { status.textContent = "Couldn't copy it. Select the link above and copy it."; }
+      if (!navigator.clipboard || !navigator.clipboard.writeText) return failed();
+      navigator.clipboard.writeText(url).then(function () { status.textContent = "Link copied."; }, failed);
+    }
+    return el("section", { class: "no-print" }, [
+      el("h1", { text: "Share Hebrew Class" }),
+      el("p", { class: "lede", text: "Send the link to a classmate or a friend." }),
+      el("div", { class: "card share-card" }, [
+        el("p", { class: "share-link", text: url }),
+        el("div", { class: "actions" }, [
+          // The phone's own share sheet (WhatsApp, Messages, …). Only on touch
+          // screens: on a computer it opens Windows' share window, which the
+          // buttons beside it already cover.
+          navigator.share && touchScreen() ? el("button", { class: "btn primary", type: "button", text: "Share…", onclick: function () {
+            navigator.share({ title: "Hebrew Class", text: SHARE_TEXT, url: url }).catch(function () { /* closed without sharing */ });
+          } }) : null,
+          el("a", { class: "btn", href: "https://wa.me/?text=" + encodeURIComponent(message), target: "_blank", rel: "noopener", text: "WhatsApp" }),
+          el("a", { class: "btn", href: "mailto:?subject=" + encodeURIComponent("Hebrew Class") + "&body=" + encodeURIComponent(message), text: "Email" }),
+          el("button", { class: "btn", type: "button", text: "Copy link", onclick: copyLink })
+        ]),
+        status
+      ])
+    ]);
   }
 
   function renderNotFound() {
@@ -645,9 +917,9 @@
     }
     return el("nav", { class: "subtabs no-print", "aria-label": "Self study" }, [
       lesson ? item("cards", lessonUrl(lesson, "cards"), "Word by word") : null,
-      lesson ? item("quiz", lessonUrl(lesson, "quiz"), "Quiz") : null,
       item("word", "#/study/word", "Word of the day"),
-      item("say", "#/study/say", "How to say")
+      item("say", "#/study/say", "How to say"),
+      lesson ? item("quiz", lessonUrl(lesson, "quiz"), "Quiz") : null
     ]);
   }
 
@@ -1841,17 +2113,94 @@
     return el("div", { class: "stat" }, [el("span", { class: "stat-value", text: String(value) }), el("span", { class: "stat-label", text: label })]);
   }
 
-  // The report itself: totals, then week by week. Used for a student's own
-  // page and for the teacher's view of that student.
+  // The phrases missed in these quizzes, most missed first. Each quiz is saved
+  // with its misses as "English = Hebrew; English = Hebrew".
+  function missedPhrases(results) {
+    var found = {};
+    var list = [];
+    results.forEach(function (r) {
+      String(r.missed || "").split(";").forEach(function (part) {
+        var text = part.trim().replace(/^'/, "");
+        if (!text) return;
+        if (!found[text]) list.push(found[text] = { text: text, count: 0, students: {} });
+        found[text].count += 1;
+        found[text].students[studentKey(r.student || "")] = true;
+      });
+    });
+    list.forEach(function (m) { m.studentCount = Object.keys(m.students).length; });
+    return list;
+  }
+
+  // perStudent: count how many students missed it, not how many times.
+  function missedList(items, limit, perStudent) {
+    var sorted = items.slice().sort(function (a, b) {
+      return perStudent ? b.studentCount - a.studentCount || b.count - a.count : b.count - a.count;
+    });
+    return el("ul", { class: "missed-list" }, sorted.slice(0, limit).map(function (m) {
+      var cut = m.text.lastIndexOf(" = ");
+      var n = perStudent ? m.studentCount : m.count;
+      return el("li", null, [
+        el("span", { class: "missed-en", text: cut === -1 ? m.text : m.text.slice(0, cut) }),
+        cut === -1 ? null : el("span", { class: "missed-he", lang: "he", dir: "rtl", text: m.text.slice(cut + 3) }),
+        el("span", { class: "missed-count", text: perStudent ? (n === 1 ? "1 student" : n + " students") : (n === 1 ? "once" : n + " times") })
+      ]);
+    }));
+  }
+
+  // One row per lesson, newest first: best score, how many of its quizzes
+  // were tried, and when the last one was taken.
+  function lessonTable(results) {
+    var byLesson = {};
+    results.forEach(function (r) { (byLesson[r.lessonId] || (byLesson[r.lessonId] = [])).push(r); });
+    var ids = lessons.map(function (l) { return l.id; });
+    Object.keys(byLesson).forEach(function (id) { if (ids.indexOf(id) === -1) ids.push(id); });
+    var rows = ids.map(function (id) {
+      var lesson = findLesson(id);
+      var tries = byLesson[id] || [];
+      var name = el("th", { scope: "row", text: lesson ? lesson.name : tries[0].lessonTitle || id });
+      if (!tries.length) return el("tr", null, [name, el("td", { class: "empty", colspan: "3", text: "Not started" })]);
+      var best = bestScores(tries)[0];
+      var tried = {};
+      tries.forEach(function (r) { if (r.quiz) tried[r.quiz] = true; });
+      var quizCount = lesson ? quizPlan(lesson).length : 0;
+      var last = tries.reduce(function (a, r) { return r.finishedAt > a ? r.finishedAt : a; }, "");
+      return el("tr", null, [
+        name,
+        el("td", null, [el("strong", { class: "score-pill " + scoreClass(best.score, best.total), text: best.score + " / " + best.total })]),
+        // Results from before a lesson had several short quizzes carry no quiz number.
+        el("td", { text: (!countDays(tried) ? "Earlier long quiz" : quizCount ? Math.min(countDays(tried), quizCount) + " of " + quizCount : String(countDays(tried)))
+          + (tries.length === 1 ? " · 1 try" : " · " + tries.length + " tries") }),
+        el("td", { class: "nowrap", text: isNaN(new Date(last)) ? "" : new Date(last).toLocaleDateString(undefined, { day: "numeric", month: "short" }) })
+      ]);
+    });
+    return el("div", { class: "grid-scroll" }, [el("table", { class: "score-grid week-grid lesson-grid" }, [
+      el("thead", null, [el("tr", null, [
+        el("th", { scope: "col", text: "Lesson" }),
+        el("th", { scope: "col", text: "Best score" }),
+        el("th", { scope: "col", text: "Quizzes tried" }),
+        el("th", { scope: "col", text: "Last quiz" })
+      ])]),
+      el("tbody", null, rows)
+    ])]);
+  }
+
+  // The report itself: totals, lesson by lesson, week by week, then what to
+  // review. Used for a student's own page, the teacher's view of that student,
+  // and the PDF of either.
   function reportNodes(results, practice) {
     var avg = averagePercent(results);
     var practisedDays = {};
     practice.forEach(function (p) { practisedDays[p.day] = true; });
+    var started = {};
+    results.forEach(function (r) { started[r.lessonId] = true; });
     var nodes = [el("div", { class: "stats" }, [
       statTile(results.length, results.length === 1 ? "quiz taken" : "quizzes taken"),
       statTile(avg === null ? "–" : avg + "%", "average of best scores"),
+      statTile(countDays(started) + " of " + Math.max(lessons.length, countDays(started)), "lessons started"),
       statTile(countDays(practisedDays), "words of the day practised")
     ])];
+    nodes.push(el("h3", { class: "report-title", text: "Lesson by lesson" }), lessonTable(results));
+    nodes.push(el("h3", { class: "report-title", text: "Week by week" }));
     var thisWeek = dayKey(weekStart(new Date()));
     var rows = weeklyProgress(results, practice).map(function (w) {
       var scores = bestScores(w.quizzes);
@@ -1880,7 +2229,62 @@
       ])]),
       el("tbody", null, rows)
     ])]));
+    var missed = missedPhrases(results);
+    if (missed.length) {
+      nodes.push(
+        el("h3", { class: "report-title", text: "Phrases to review" }),
+        el("p", { class: "hint", text: "The ones missed most often in quizzes." }),
+        missedList(missed, 12, false)
+      );
+    }
     return nodes;
+  }
+
+  /* ---------- Report as PDF ----------
+     The browser's own print window saves a PDF ("Save as PDF"), so no PDF
+     library is needed. Only the report is printed, with normal page margins
+     (the lesson sheet prints edge to edge). */
+
+  var clearPrint = null;
+
+  function printReport(title, subtitle, nodes) {
+    if (clearPrint) clearPrint();
+    var area = el("div", { id: "print-area" }, [
+      el("div", { class: "print-head" }, [
+        el("strong", { text: "Hebrew Class" }),
+        el("span", { text: new Date().toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }) })
+      ]),
+      el("h1", { text: title }),
+      subtitle ? el("p", { class: "lede", text: subtitle }) : null
+    ].concat(nodes));
+    var pageRule = el("style", { text: "@page { size: A4; margin: 14mm; }" });
+    var oldTitle = document.title;
+    document.body.appendChild(area);
+    document.head.appendChild(pageRule);
+    document.documentElement.classList.add("print-report");
+    document.title = "Hebrew Class - " + title + " - " + dayKey(new Date()); // the PDF's suggested file name
+    clearPrint = function () {
+      clearPrint = null;
+      document.documentElement.classList.remove("print-report");
+      pageRule.remove();
+      area.remove();
+      document.title = oldTitle;
+    };
+    window.addEventListener("afterprint", function done() {
+      window.removeEventListener("afterprint", done);
+      if (clearPrint) clearPrint();
+    });
+    window.print();
+  }
+
+  function pdfButton(makeReport) {
+    return el("button", {
+      class: "btn no-print",
+      type: "button",
+      title: "Opens the print window: choose “Save as PDF” there",
+      text: "Download PDF",
+      onclick: makeReport
+    });
   }
 
   function loadReport() {
@@ -1917,10 +2321,17 @@
       if (!report.error) wrap.appendChild(el("p", { class: "notice", text: "Loading your progress…" }));
       return wrap;
     }
-    wrap.appendChild(el("div", { class: "card dash-card" }, reportNodes(report.data.results, report.data.practice)));
-    if (!report.data.results.length && !report.data.practice.length) {
-      wrap.appendChild(el("p", { class: "notice", text: "Nothing here yet. Take a quiz or practise the word of the day and it will show up." }));
+    var empty = !report.data.results.length && !report.data.practice.length;
+    if (!empty) {
+      wrap.appendChild(el("div", { class: "actions report-actions" }, [
+        pdfButton(function () {
+          printReport("Progress report", state.student.name, reportNodes(report.data.results, report.data.practice));
+        }),
+        el("span", { class: "hint no-print", text: "Opens the print window. Choose “Save as PDF” there." })
+      ]));
     }
+    wrap.appendChild(el("div", { class: "card dash-card" }, reportNodes(report.data.results, report.data.practice)));
+    if (empty) wrap.appendChild(el("p", { class: "notice", text: "Nothing here yet. Take a quiz or practise the word of the day and it will show up." }));
     wrap.appendChild(el("p", { class: "hint", text: state.student.token
       ? "Only you and your teacher can see this report."
       : "You signed in without a PIN, so anyone who types your name can see this page. To keep it private, sign out and sign in again with a PIN of your choice." }));
@@ -2301,6 +2712,7 @@
         t.results = res.results || [];
         t.practice = res.practice || [];
         t.students = res.students || [];
+        t.pinChanges = res.pinChanges || null; // null: a Google script from before the PIN log
         t.error = "";
         t.updatedAt = new Date();
       } else if (res && res.error === "wrong-passcode") {
@@ -2389,10 +2801,15 @@
     }
     wrap.appendChild(renderWeekCard(t));
     if (t.report) wrap.appendChild(renderStudentReport(t));
-    if (!t.results.length) return wrap;
-    wrap.appendChild(renderScoreGrid(t));
-    if (t.selected) wrap.appendChild(renderAttempts(t));
-    wrap.appendChild(renderRecent(t));
+    if (t.results.length) {
+      wrap.appendChild(renderScoreGrid(t));
+      if (t.selected) wrap.appendChild(renderAttempts(t));
+      var missedCard = renderMissedCard(t);
+      if (missedCard) wrap.appendChild(missedCard);
+      wrap.appendChild(renderRecent(t));
+    }
+    var pinCard = renderPinChanges(t);
+    if (pinCard) wrap.appendChild(pinCard);
     return wrap;
   }
 
@@ -2429,11 +2846,16 @@
   }
 
   // One week for the whole class: quizzes taken, average score, word of the day.
-  function renderWeekCard(t) {
-    var start = addDays(weekStart(new Date()), 7 * t.week);
+  function teacherWeekStart(t) {
+    return addDays(weekStart(new Date()), 7 * t.week);
+  }
+
+  // What each student did in the week the teacher is looking at.
+  function weekRows(t) {
+    var start = teacherWeekStart(t);
     var startKey = dayKey(start);
     var endKey = dayKey(addDays(start, 6));
-    var body = el("tbody", null, knownStudents(t).map(function (s) {
+    return knownStudents(t).map(function (s) {
       var data = studentData(t, s.key);
       var quizzes = data.results.filter(function (r) {
         var d = new Date(r.finishedAt);
@@ -2444,33 +2866,51 @@
         var d = parseDay(p.day);
         if (d && p.day >= startKey && p.day <= endKey) days[d.getDay()] = true;
       });
-      var avg = averagePercent(quizzes);
+      return { student: s, quizzes: quizzes, days: days, avg: averagePercent(quizzes) };
+    });
+  }
+
+  // The class's week: totals, then one row per student. linked: names open
+  // that student's report (on screen); the PDF has plain names.
+  function weekNodes(t, linked) {
+    var rows = weekRows(t);
+    var active = 0, quizzes = 0, words = 0, sum = 0, marked = 0;
+    rows.forEach(function (r) {
+      if (r.quizzes.length || countDays(r.days)) active += 1;
+      quizzes += r.quizzes.length;
+      words += countDays(r.days);
+      if (r.avg !== null) { sum += r.avg; marked += 1; }
+    });
+    var body = el("tbody", null, rows.map(function (r) {
+      var s = r.student;
       var open = t.report === s.key;
       return el("tr", null, [
-        el("th", { scope: "row" }, [el("button", {
+        el("th", { scope: "row" }, [linked ? el("button", {
           class: "linklike",
           type: "button",
           "aria-expanded": open ? "true" : "false",
           text: s.name,
-          onclick: function () { t.report = open ? null : s.key; render(); }
-        })]),
-        el("td", { class: quizzes.length ? null : "empty", text: quizzes.length ? String(quizzes.length) : "–" }),
-        el("td", { class: avg === null ? "empty" : null }, [
-          avg === null ? "–" : el("strong", { class: "score-pill " + scoreClass(avg, 100), text: avg + "%" })
+          onclick: function () {
+            t.report = open ? null : s.key;
+            render();
+            // The report opens below the table, often off screen: go to it.
+            var card = document.getElementById("student-report");
+            if (card) card.scrollIntoView({ block: "start" });
+          }
+        }) : s.name]),
+        el("td", { class: r.quizzes.length ? null : "empty", text: r.quizzes.length ? String(r.quizzes.length) : "–" }),
+        el("td", { class: r.avg === null ? "empty" : null }, [
+          r.avg === null ? "–" : el("strong", { class: "score-pill " + scoreClass(r.avg, 100), text: r.avg + "%" })
         ]),
-        el("td", null, [dayDots(days)])
+        el("td", null, [dayDots(r.days)])
       ]);
     }));
-    return el("div", { class: "card dash-card" }, [
-      el("div", { class: "week-head" }, [
-        el("div", null, [
-          el("h2", { text: "Weekly progress" }),
-          el("p", { class: "hint", text: weekLabel(start) + (t.week === 0 ? " · this week" : "") + ". Tap a name for that student's full report." })
-        ]),
-        el("div", { class: "week-nav" }, [
-          el("button", { class: "btn", type: "button", "aria-label": "Previous week", text: "←", onclick: function () { t.week -= 1; render(); } }),
-          el("button", { class: "btn", type: "button", "aria-label": "Next week", text: "→", disabled: t.week >= 0, onclick: function () { t.week += 1; render(); } })
-        ])
+    return [
+      el("div", { class: "stats" }, [
+        statTile(active + " of " + rows.length, "students active"),
+        statTile(quizzes, quizzes === 1 ? "quiz taken" : "quizzes taken"),
+        statTile(marked ? Math.round(sum / marked) + "%" : "–", "class average"),
+        statTile(words, "words of the day practised")
       ]),
       el("div", { class: "grid-scroll" }, [el("table", { class: "score-grid week-grid" }, [
         el("thead", null, [el("tr", null, [
@@ -2481,7 +2921,36 @@
         ])]),
         body
       ])])
-    ]);
+    ];
+  }
+
+  // One week for the whole class: quizzes taken, average score, word of the day.
+  function renderWeekCard(t) {
+    var start = teacherWeekStart(t);
+    return el("div", { class: "card dash-card" }, [
+      el("div", { class: "week-head" }, [
+        el("div", null, [
+          el("h2", { text: "Weekly progress" }),
+          el("p", { class: "hint", text: weekLabel(start) + (t.week === 0 ? " · this week" : "") + ". Tap a name for that student's full report and PIN buttons (it opens below the table)." })
+        ]),
+        el("div", { class: "week-nav" }, [
+          el("button", { class: "btn", type: "button", "aria-label": "Previous week", text: "←", onclick: function () { t.week -= 1; render(); } }),
+          el("button", { class: "btn", type: "button", "aria-label": "Next week", text: "→", disabled: t.week >= 0, onclick: function () { t.week += 1; render(); } }),
+          pdfButton(function () { printClassReport(t); })
+        ])
+      ])
+    ].concat(weekNodes(t, true)));
+  }
+
+  // The class report as a PDF: the chosen week, then everything so far.
+  function printClassReport(t) {
+    var nodes = weekNodes(t, false);
+    if (t.results.length) {
+      nodes.push(el("h3", { class: "report-title", text: "Best score per lesson, all weeks" }), scoreGrid(t, false));
+      var missed = missedPhrases(t.results);
+      if (missed.length) nodes.push(el("h3", { class: "report-title", text: "Most missed phrases" }), missedList(missed, 15, true));
+    }
+    printReport("Class report", "Week of " + weekLabel(teacherWeekStart(t)), nodes);
   }
 
   function renderStudentReport(t) {
@@ -2490,17 +2959,122 @@
     var data = studentData(t, student.key);
     var onFile = t.students.filter(function (s) { return studentKey(s.name) === student.key; })[0];
     var email = onFile && onFile.email;
-    return el("div", { class: "card dash-card" }, [
+    var pin = t.pinReset && t.pinReset.key === student.key ? t.pinReset : null;
+    var history = (t.pinChanges || []).filter(function (c) { return studentKey(c.student) === student.key; });
+    return el("div", { class: "card dash-card", id: "student-report" }, [
       el("div", { class: "week-head" }, [
         el("h2", { text: student.name + " · full report" }),
-        el("button", { class: "btn", type: "button", text: "Close", onclick: function () { t.report = null; render(); } })
+        el("div", { class: "week-nav" }, [
+          onFile && onFile.hasPin && email ? el("button", { class: "btn", type: "button", disabled: !!(pin && pin.busy), text: pin && pin.busy === "email" ? "Sending…" : "Email temporary PIN", onclick: function () { emailTempPin(onFile); } }) : null,
+          onFile && onFile.hasPin ? el("button", { class: "btn", type: "button", disabled: !!(pin && pin.busy), text: pin && pin.busy === "clear" ? "Clearing…" : "Clear PIN", onclick: function () { clearPin(onFile); } }) : null,
+          pdfButton(function () { printReport("Progress report", student.name, reportNodes(data.results, data.practice)); }),
+          el("button", { class: "btn", type: "button", text: "Close", onclick: function () { t.report = null; t.pinReset = null; render(); } })
+        ])
       ]),
-      email ? el("p", { class: "hint" }, [el("a", { href: "mailto:" + email, text: email })]) : null
+      email ? el("p", { class: "hint" }, [el("a", { href: "mailto:" + email, text: email })]) : null,
+      pin && pin.message ? el("p", { class: "notice" + (pin.error ? " error" : ""), role: "status", text: pin.message }) : null,
+      // Until the student uses it. The PIN itself is only in their email (and the sheet).
+      onFile && onFile.tempPinSent && !(pin && pin.message && !pin.error) ? el("p", { class: "notice", role: "status", text: "A temporary PIN was emailed to " + onFile.name + " and hasn't been used yet. It works until they sign in with it and choose their own PIN." }) : null,
+      history.length ? el("details", { class: "pin-history" }, [
+        el("summary", { text: "PIN history (" + history.length + ")" }),
+        pinChangeList(history.slice().reverse(), false)
+      ]) : null
     ].concat(reportNodes(data.results, data.practice)));
+  }
+
+  // Newest first. withNames: the class list (names shown); a student's own list leaves them out.
+  function pinChangeList(changes, withNames) {
+    return el("ul", { class: "recent pin-changes" }, changes.map(function (c) {
+      return el("li", null, [
+        withNames ? el("span", { class: "recent-name", text: c.student.trim() }) : null,
+        el("span", { text: c.change }),
+        el("span", { class: "muted", text: formatTime(c.at) })
+      ]);
+    }));
+  }
+
+  // Every PIN set, reset or changed, and every sign-in pause, newest first. Never the PINs.
+  function renderPinChanges(t) {
+    if (!t.pinChanges) return null;
+    var all = t.pinChanges.slice().reverse();
+    var shown = t.allPinChanges ? all : all.slice(0, 10);
+    return el("div", { class: "card dash-card" }, [
+      el("h2", { text: "PIN changes" }),
+      el("p", { class: "hint", text: all.length ? "PINs chosen, reset or changed, and sign-ins paused after wrong PINs. The PINs themselves are never shown." : "No PIN changes yet." }),
+      all.length ? pinChangeList(shown, true) : null,
+      all.length > 10 ? el("button", { class: "btn", type: "button", text: t.allPinChanges ? "Show the latest 10" : "Show all " + all.length, onclick: function () { t.allPinChanges = !t.allPinChanges; render(); } }) : null
+    ]);
+  }
+
+  // A PIN action on a student's report; busy is "email" or "clear".
+  function pinAction(onFile, busy, body, onOk, failText) {
+    var t = state.teacher;
+    var key = studentKey(onFile.name);
+    t.pinReset = { key: key, busy: busy };
+    render();
+    function done(message, error) {
+      t.pinReset = { key: key, message: message, error: error };
+      render();
+    }
+    body.passcode = t.passcode;
+    body.name = onFile.name;
+    callBackend(body).then(function (res) {
+      if (res && res.ok) {
+        done(onOk(res));
+        loadResults(); // brings in the PIN history line
+      } else if (res && res.error === "mail-failed") {
+        done("The email couldn't be sent, so the PIN hasn't changed. Try again later, or use Clear PIN.", true);
+      } else if (res && res.error === "no-email") {
+        done("There's no email saved for " + onFile.name + ". Use Clear PIN instead.", true);
+      } else {
+        done(backendMessage(res, failText + " Try again."), true);
+      }
+    }, function () {
+      done(failText + " Check your connection and try again.", true);
+    });
+  }
+
+  // A 3-digit temporary PIN, sent only to the student's own email.
+  function emailTempPin(onFile) {
+    if (!window.confirm("Send " + onFile.name + " a temporary PIN by email (" + onFile.email + ")? Their old PIN stops working; they sign in with the temporary PIN and then choose their own.")) return;
+    pinAction(onFile, "email", { action: "emailTempPin", siteUrl: config.siteUrl || "" }, function (res) {
+      onFile.tempPinSent = true;
+      return "Temporary PIN sent to " + (res.sentTo || onFile.email) + ". " + onFile.name + " signs in with it and then chooses their own PIN.";
+    }, "Couldn't send the temporary PIN.");
+  }
+
+  // For a student with no email: their name works without a PIN until they choose one.
+  function clearPin(onFile) {
+    if (!window.confirm("Are you sure you want to clear the PIN for " + onFile.name + "? Until they sign in and choose a new PIN, anyone who types their name can sign in as them.")) return;
+    pinAction(onFile, "clear", { action: "resetPin" }, function () {
+      onFile.hasPin = false;
+      onFile.tempPinSent = false;
+      return "PIN cleared. Ask " + onFile.name + " to sign in soon with just their name and type a new PIN.";
+    }, "Couldn't clear the PIN.");
+  }
+
+  // Which phrases the class gets wrong most: what to go over again.
+  function renderMissedCard(t) {
+    var missed = missedPhrases(t.results);
+    if (!missed.length) return null;
+    return el("div", { class: "card dash-card" }, [
+      el("h2", { text: "Most missed phrases" }),
+      el("p", { class: "hint", text: "The phrases most students got wrong in quizzes: good ones to go over in class." }),
+      missedList(missed, 10, true)
+    ]);
   }
 
   // Students down the side, lessons across the top; each cell is the best score.
   function renderScoreGrid(t) {
+    return el("div", { class: "card dash-card" }, [
+      el("h2", { text: "Best score per lesson" }),
+      el("p", { class: "hint", text: "Tap a score to see each try and the phrases missed." }),
+      scoreGrid(t, true)
+    ]);
+  }
+
+  // linked: a score opens its tries (on screen); the PDF has plain scores.
+  function scoreGrid(t, linked) {
     var students = {};
     var lessonIds = lessons.slice().reverse().map(function (l) { return l.id; });
     var lessonTitles = {};
@@ -2530,27 +3104,25 @@
         var best = attempts.reduce(function (a, b) {
           return b.score / b.total > a.score / a.total ? b : a;
         });
-        var selected = t.selected && t.selected.student === key && t.selected.lessonId === id;
-        return el("td", null, [el("button", {
+        var selected = linked && t.selected && t.selected.student === key && t.selected.lessonId === id;
+        var inside = [
+          el("span", { class: "cell-score", text: best.score + "/" + best.total }),
+          el("span", { class: "cell-tries", text: attempts.length === 1 ? "1 try" : attempts.length + " tries" })
+        ];
+        var look = "cell " + scoreClass(best.score, best.total) + (selected ? " selected" : "");
+        return el("td", null, [linked ? el("button", {
           type: "button",
-          class: "cell " + scoreClass(best.score, best.total) + (selected ? " selected" : ""),
+          class: look,
           "aria-label": s.name + ": best " + best.score + " of " + best.total + ", " + attempts.length + " tries. Show details",
           onclick: function () {
             t.selected = selected ? null : { student: key, lessonId: id };
             render();
           }
-        }, [
-          el("span", { class: "cell-score", text: best.score + "/" + best.total }),
-          el("span", { class: "cell-tries", text: attempts.length === 1 ? "1 try" : attempts.length + " tries" })
-        ])]);
+        }, inside) : el("span", { class: look }, inside)]);
       })));
     }));
 
-    return el("div", { class: "card dash-card" }, [
-      el("h2", { text: "Best score per lesson" }),
-      el("p", { class: "hint", text: "Tap a score to see each try and the phrases missed." }),
-      el("div", { class: "grid-scroll" }, [el("table", { class: "score-grid" }, [el("thead", null, [head]), body])])
-    ]);
+    return el("div", { class: "grid-scroll" }, [el("table", { class: "score-grid" }, [el("thead", null, [head]), body])]);
   }
 
   function renderAttempts(t) {

@@ -11,7 +11,9 @@ Across the whole site (menu at the top of every page):
 - **Sign-in**: students sign in with their name; an email and a PIN are optional. The email is saved on the **Students** tab of your sheet. The teacher signs in with the teacher passcode.
 - **Self study** also has the *Word of the day* (one word a day about family or something positive, the same for everyone, with a one-question check; the words are in `words/daily-words.js`, and a word already used in a lesson is skipped) and *How to say* (type or say a short English phrase and get Google's Hebrew translation with audio).
 - **Suggestions**: students suggest improvements or lesson topics; everyone sees the list and the teacher's responses.
-- **My progress**: each student's quiz scores and Word of the day practice, week by week. The teacher sees everyone's on the Teacher page.
+- **My progress**: each student's quiz scores and Word of the day practice, lesson by lesson and week by week, with the phrases they miss most. The teacher sees everyone's on the Teacher page, with the class's totals for the week and its most missed phrases.
+- **Download PDF** on a report opens the browser's print window; choose "Save as PDF" there. The teacher can save the class report or one student's.
+- **Share** (in the top menu) sends the site's link (`siteUrl` in `config.js`) by the phone's share menu (on phones and tablets), WhatsApp, email or a copied link.
 
 There is no build step. Open `index.html` in a browser to try it locally.
 
@@ -28,7 +30,7 @@ There is no build step. Open `index.html` in a browser to try it locally.
 
 When a student finishes a quiz, the score shows up on the **Teacher** page (in the top menu once you are signed in as the teacher, or `#/teacher`). It shows the week's progress for every student (tap a name for that student's full report), how many suggestions are waiting for a response, each student's best score per lesson, every try with the phrases they missed, and the latest quizzes. It refreshes every 30 seconds.
 
-Behind the scenes everything is stored in a Google Sheet you own, through a small Apps Script. The script makes the tabs it needs: **Results**, **Students**, **Practice** (Word of the day), **Suggestions** and **Attendance**. One-time setup:
+Behind the scenes everything is stored in a Google Sheet you own, through a small Apps Script. The script makes the tabs it needs: **Results**, **Students**, **Practice** (Word of the day), **Suggestions**, **Attendance** and **PIN changes**. One-time setup:
 
 1. Create a new Google Sheet, for example "Hebrew Class results".
 2. In the sheet choose **Extensions → Apps Script**, delete the sample code and paste in `results-sheet/Code.gs`.
@@ -37,13 +39,18 @@ Behind the scenes everything is stored in a Google Sheet you own, through a smal
 5. Copy the **Web app URL** (it ends in `/exec`) into `resultsUrl` in `config.js`, then commit and push.
 6. Open the site, choose **Teacher? Sign in here** and enter your passcode once.
 
-If you change `Code.gs` later (including the passcode), paste the new file into Apps Script, put your passcode back on the `TEACHER_PASSCODE` line, and use **Deploy → Manage deployments → Edit → Version: New version** so the URL stays the same. Google may ask you to allow permissions again (How to say uses Google's translator). Until the script is updated, new features say they aren't switched on yet; the lessons and quizzes keep working.
+If you change `Code.gs` later (including the passcode), paste the new file into Apps Script, put your passcode back on the `TEACHER_PASSCODE` line, and use **Deploy → Manage deployments → Edit → Version: New version** so the URL stays the same. Google may ask you to allow permissions again (How to say uses Google's translator). For the PIN reset emails, choose the function **allowEmail** at the top of the Apps Script editor and press **Run** once, then allow the script to send email as you. Until the script is updated, new features say they aren't switched on yet; the lessons and quizzes keep working.
 
 ## Students, PINs and privacy
 
 - A student signs in with a name. The same name typed with different capitals or spaces counts as one student, so two students need different names (add a surname initial).
 - A PIN (4 to 8 digits) is optional. A student sets one by typing it when signing in. From then on that name's progress report, scores, practice and suggestions need the PIN; without a PIN, anyone who types the name can see that student's report.
-- The sheet keeps a scrambled form of the PIN, never the PIN itself. If a student forgets it, clear their **PIN** cell on the **Students** tab and they can sign in and choose a new one. Five wrong PINs pause sign-in for that name for 10 minutes.
+- The sheet keeps a scrambled form of the PIN, never the PIN itself. A student who forgets it can choose **Forgot your PIN?** on the sign-in page: a 6-digit code goes to the email saved for their name (it works for 15 minutes; up to 3 codes an hour), and with it they choose a new PIN. The emails are sent from the Google account that owns the script. If no email is saved for the name, it tells them straight away to ask the teacher.
+- The teacher can also help, on the student's report on the Teacher page (tap their name):
+  - **Email temporary PIN** (when the student has an email saved): a 3-digit temporary PIN goes to that email only; your screen doesn't show it. Their old PIN stops working. It is kept in their **PIN** cell on the **Students** tab as "Temporary: 482" until they use it. They sign in with it and must then choose their own PIN.
+  - **Clear PIN** (for a student with no email who asks you): their name works without a PIN until they sign in and type a new one, so ask them to do that soon.
+- Either way their scores are kept. Five wrong PINs pause sign-in for that name for 10 minutes; a reset ends the pause.
+- Every PIN chosen, reset or changed, every code emailed and every pause after wrong PINs is listed under **PIN changes** on the Teacher page (and under **PIN history** in each student's report), and kept on the **PIN changes** tab of the sheet. The PINs themselves are never listed.
 - Only the teacher passcode opens everyone's reports. This is light protection suited to a class, not for sensitive data.
 - How to say sends the typed phrase to Google to be translated. The translation has no vowel marks and can be wrong.
 

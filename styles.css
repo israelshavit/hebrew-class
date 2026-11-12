@@ -252,7 +252,7 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .response-form .field { margin-bottom: 10px; }
 
 /* Progress reports */
-.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
 .stat { display: grid; gap: 2px; padding: 12px; border-radius: var(--radius-sm); background: var(--bg); text-align: center; }
 .stat-value { font-size: 1.6rem; font-weight: 800; color: var(--accent-dark); line-height: 1.2; }
 .stat-label { color: var(--muted); font-size: .85rem; }
@@ -280,6 +280,29 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .week-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .week-nav { display: flex; gap: 6px; flex: none; }
 .week-nav .btn { padding: 0 14px; }
+.report-title { font-size: 1rem; margin: 20px 0 6px; }
+.lesson-grid tbody th { white-space: normal; }
+.nowrap { white-space: nowrap; }
+.report-actions { align-items: center; margin: 0 0 12px; }
+.report-actions .hint { margin: 0; }
+.missed-list { list-style: none; margin: 0; padding: 0; }
+.missed-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 4px 14px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.missed-list li:last-child { border-bottom: 0; }
+.missed-he { font-size: 1.1rem; }
+.missed-count { color: var(--muted); font-size: .85rem; white-space: nowrap; min-width: 5.5em; text-align: right; }
+
+/* Share the site */
+.share-card .actions { margin-top: 12px; }
+.share-link { margin: 0; font-weight: 600; overflow-wrap: anywhere; user-select: all; }
+.share-status { display: block; margin-top: 10px; color: var(--muted); font-size: .9rem; }
+.share-status:empty { display: none; }
 .suggest-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .suggest-card .hint { margin: 0; }
 
@@ -602,6 +625,11 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .recent-name { font-weight: 600; }
 .recent .muted { grid-column: 1; font-size: .9rem; }
 .recent .score-pill { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+.pin-changes li { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; }
+.pin-changes .muted { margin-left: auto; }
+.pin-history { margin: 4px 0 12px; }
+.pin-history summary { cursor: pointer; font-weight: 600; }
+.pin-changes + .btn { margin-top: 10px; }
 
 @media (max-width: 560px) {
   h1 { font-size: 1.35rem; }
@@ -610,10 +638,14 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
   .option, .match-item { font-size: 1.15rem; }
   .match-item.en { font-size: .9rem; }
   .tab { padding: 10px; }
-  .mainnav-inner { padding: 0 4px; gap: 0; }
-  .mainnav-link { padding: 12px 9px 9px; font-size: .95rem; }
+  .mainnav-inner { padding: 0; gap: 0; }
+  /* Five items have to fit across a phone. */
+  .mainnav-link { flex: 1 1 auto; padding: 12px 4px 9px; font-size: .88rem; text-align: center; }
   .topnav-out { padding: 2px 8px; }
-  .stats { gap: 6px; }
+  .stats { gap: 6px; grid-template-columns: repeat(2, 1fr); }
+  .week-head { flex-wrap: wrap; }
+  .missed-list li { grid-template-columns: 1fr auto; }
+  .missed-count { grid-column: 1 / -1; text-align: left; }
   .stat { padding: 10px 6px; }
   .stat-value { font-size: 1.3rem; }
   .day-dot { width: 18px; height: 18px; font-size: .6rem; }
@@ -642,4 +674,34 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
     height: 296mm;
     padding: 9mm;
   }
+}
+
+/* A progress report saved as a PDF: only the report, on pages with margins
+   (app.js adds the page margin while it prints). */
+#print-area { display: none; }
+@media print {
+  html.print-report main { display: none !important; }
+  html.print-report #print-area { display: block; font-size: 10.5pt; }
+  #print-area * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .print-head {
+    display: flex;
+    justify-content: space-between;
+    padding-bottom: 6px;
+    margin-bottom: 14px;
+    border-bottom: 2px solid var(--accent);
+    color: var(--muted);
+    font-size: 9.5pt;
+  }
+  .print-head strong { color: var(--accent-dark); }
+  #print-area h1 { font-size: 18pt; margin: 0 0 2px; }
+  #print-area .lede { margin: 0 0 14px; }
+  #print-area .report-title { font-size: 12pt; margin: 18px 0 6px; break-after: avoid; }
+  #print-area .grid-scroll { overflow: visible; }
+  #print-area .score-grid { width: 100%; }
+  #print-area .score-grid th:first-child { position: static; background: none; }
+  #print-area .score-grid thead th { min-width: 0; }
+  #print-area tr, #print-area li, #print-area .stat { break-inside: avoid; }
+  #print-area .stats { grid-template-columns: repeat(4, 1fr); }
+  #print-area .stat { border: 1px solid var(--border); }
+  #print-area .cell { min-height: 0; padding: 3px 6px; }
 }

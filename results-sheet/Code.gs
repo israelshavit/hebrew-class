@@ -25,6 +25,11 @@ function doPost(e) {
   if (data.action === "suggestions") return listSuggestions();
   if (data.action === "suggest") return saveSuggestion(data);
   if (data.action === "suggestReply") return replySuggestion(data);
+  if (data.action === "resetPin") return resetPin(data);
+  if (data.action === "emailTempPin") return emailTempPin(data);
+  if (data.action === "pinOptions") return pinOptions(data);
+  if (data.action === "pinCode") return sendPinCode(data);
+  if (data.action === "pinCodeReset") return resetPinWithCode(data);
   if (data.action === "translate") return translate(data);
   if (data.action === "liveState") return reply(liveReply(liveState()));
   if (data.action === "liveJoin") return liveJoin(data);
@@ -155,14 +160,39 @@ function withLock(fn) {
 /* ---------- Students ----------
    A student signs in with a name. A PIN is optional: once a student has set
    one, their report, scores, practice and suggestions need it. The PIN itself
-   is never stored, only a scrambled form of it. To reset a forgotten PIN,
-   clear that student's "PIN" cell on the Students sheet. */
+   is never stored, only a scrambled form of it. A student who forgot it gets a
+   code by email (below). Or, on the student's report on the Teacher page, the
+   teacher presses Email temporary PIN: a 3-digit PIN goes to the student's
+   email and is kept in the "PIN" cell ("Temporary: 482"); the student signs in
+   with it and must then choose their own PIN. For a student with no email the
+   teacher presses Clear PIN. Every change is written to the "PIN changes" sheet. */
 
 var STUDENTS_SHEET = "Students";
 // Email is last so sheets made before it was added keep their columns.
 var STUDENTS_HEADERS = ["Joined", "Name", "Key", "PIN", "Email"];
 var PIN_TRIES = 5; // wrong PINs allowed before a pause
 var PIN_PAUSE_SECONDS = 600;
+var TEMP_PIN_PREFIX = "Temporary: ";
+var PIN_LOG_SHEET = "PIN changes";
+var PIN_LOG_HEADERS = ["When", "Student", "Change"];
+
+// The 3 digits of a temporary PIN cell, or "" for a real (scrambled) PIN.
+function tempPinOf(cell) {
+  var m = /^Temporary: (\d{3})$/.exec(String(cell || ""));
+  return m ? m[1] : "";
+}
+
+// One line on the PIN changes sheet. Never the PIN itself. Call it inside withLock.
+function logPin(name, change) {
+  namedSheet(PIN_LOG_SHEET, PIN_LOG_HEADERS).appendRow([new Date(), safe(name, 60), safe(change, 200)]);
+}
+
+// Counts a wrong PIN; the fifth in 10 minutes pauses sign-in for that name.
+function wrongPin(cache, triesKey, name) {
+  var tries = (Number(cache.get(triesKey)) || 0) + 1;
+  cache.put(triesKey, String(tries), PIN_PAUSE_SECONDS);
+  if (tries === PIN_TRIES) logPin(name, PIN_TRIES + " wrong PINs: sign-in paused for 10 minutes");
+}
 
 function cleanName(value) {
   return String(value || "").trim().replace(/\s+/g, " ").slice(0, 60);
@@ -231,8 +261,11 @@ function signIn(data) {
   var name = cleanName(data.name);
   var key = name.toLowerCase();
   var pin = String(data.pin || "").trim();
+  var newPin = String(data.newPin || "").trim(); // only after a temporary PIN
   if (!name) return reply({ ok: false, error: "bad-name" });
-  if (pin && !/^\d{4,8}$/.test(pin)) return reply({ ok: false, error: "bad-pin" });
+  // 3 digits is a temporary PIN from the teacher; a PIN of one's own is 4 to 8.
+  if (pin && !/^\d{3,8}$/.test(pin)) return reply({ ok: false, error: "bad-pin" });
+  if (newPin && !/^\d{4,8}$/.test(newPin)) return reply({ ok: false, error: "bad-pin" });
   var email = String(data.email || "").trim().toLowerCase().slice(0, 120);
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return reply({ ok: false, error: "bad-email" });
 
@@ -243,18 +276,39 @@ function signIn(data) {
   var out;
   withLock(function () {
     var student = findStudent(key);
+    var temp = student ? tempPinOf(student.pin) : "";
     var hash = pin ? pinHash(key, pin) : "";
-    if (!student) {
+    if ((!student || !student.pin) && pin && !/^\d{4,8}$/.test(pin)) {
+      out = { ok: false, error: "bad-pin" };
+    } else if (!student) {
       studentsSheet().appendRow([new Date(), safe(name, 60), safe(key, 60), hash, safe(email, 120)]);
+      if (pin) logPin(name, "Chose a PIN");
       out = { ok: true, name: name, created: true, hasPin: !!pin, token: pin ? tokenFor(key, hash) : "" };
     } else if (!student.pin) {
       // No PIN yet: typing one now sets it.
-      if (hash) studentsSheet().getRange(student.row, 4).setValue(hash);
+      if (hash) {
+        studentsSheet().getRange(student.row, 4).setValue(hash);
+        logPin(student.name, "Chose a PIN");
+      }
       out = { ok: true, name: student.name, created: false, hasPin: !!pin, token: pin ? tokenFor(key, hash) : "" };
     } else if (!pin) {
       out = { ok: false, error: "pin-needed" };
+    } else if (temp) {
+      // The teacher's temporary PIN: right, then the student chooses their own.
+      if (pin !== temp) {
+        wrongPin(cache, triesKey, student.name);
+        out = { ok: false, error: "wrong-pin" };
+      } else if (!newPin) {
+        out = { ok: false, error: "choose-pin" };
+      } else {
+        var newHash = pinHash(key, newPin);
+        studentsSheet().getRange(student.row, 4).setValue(newHash);
+        logPin(student.name, "Used the temporary PIN and chose a new PIN");
+        cache.remove(triesKey);
+        out = { ok: true, name: student.name, created: false, hasPin: true, token: tokenFor(key, newHash) };
+      }
     } else if (hash !== student.pin) {
-      cache.put(triesKey, String((Number(cache.get(triesKey)) || 0) + 1), PIN_PAUSE_SECONDS);
+      wrongPin(cache, triesKey, student.name);
       out = { ok: false, error: "wrong-pin" };
     } else {
       cache.remove(triesKey);
@@ -263,6 +317,171 @@ function signIn(data) {
     // An email typed at a successful sign-in replaces the one on file.
     if (out.ok && student && email) studentsSheet().getRange(student.row, 5).setValue(safe(email, 120));
   });
+  return reply(out);
+}
+
+// The teacher clears a forgotten PIN for a student with no email (and ends any
+// pause after wrong tries). Until the student signs in and types a new PIN,
+// their name works without one, so clear it only when they ask.
+function resetPin(data) {
+  if (!isTeacher(data)) return reply({ ok: false, error: "wrong-passcode" });
+  var key = nameKey(data.name);
+  if (!key) return reply({ ok: false, error: "bad-request" });
+  var found = false;
+  withLock(function () {
+    var student = findStudent(key);
+    if (!student) return;
+    studentsSheet().getRange(student.row, 4).setValue("");
+    logPin(student.name, "Teacher cleared the PIN");
+    found = true;
+  });
+  if (!found) return reply({ ok: false, error: "not-found" });
+  CacheService.getScriptCache().remove("pinTries:" + sha(key));
+  return reply({ ok: true });
+}
+
+// The teacher sends a 3-digit temporary PIN to the email saved for the student.
+// It goes only to that email (the teacher's screen doesn't show it) and is kept
+// in the student's PIN cell as "Temporary: 482". The old PIN stops working; the
+// student signs in with the temporary PIN and must then choose their own.
+function emailTempPin(data) {
+  if (!isTeacher(data)) return reply({ ok: false, error: "wrong-passcode" });
+  var key = nameKey(data.name);
+  if (!key) return reply({ ok: false, error: "bad-request" });
+  var student = studentWithEmail(key);
+  if (!student) return reply({ ok: false, error: "not-found" });
+  if (!student.email) return reply({ ok: false, error: "no-email" });
+  var site = /^https:\/\/[^\s]+$/.test(String(data.siteUrl || "")) ? String(data.siteUrl) : "";
+  var temp = String(100 + Math.floor(Math.random() * 900));
+  try {
+    MailApp.sendEmail({
+      to: student.email,
+      subject: "Hebrew Class: your temporary PIN",
+      body: "Hello " + student.name + ",\n\n" +
+        "Your teacher has reset your Hebrew Class PIN. Your temporary PIN is: " + temp + "\n\n" +
+        "Sign in" + (site ? " at " + site : "") + " with your name and this PIN, then choose your own PIN. " +
+        "Your old PIN no longer works. Your scores are kept.\n"
+    });
+  } catch (err) {
+    return reply({ ok: false, error: "mail-failed" });
+  }
+  withLock(function () {
+    studentsSheet().getRange(student.row, 4).setValue(TEMP_PIN_PREFIX + temp);
+    logPin(student.name, "Teacher emailed a temporary PIN (" + maskEmail(student.email) + ")");
+  });
+  CacheService.getScriptCache().remove("pinTries:" + sha(key));
+  return reply({ ok: true, sentTo: student.email });
+}
+
+/* A student who forgot their PIN resets it themselves: a 6-digit code goes to
+   the email saved for their name, and the code lets them choose a new PIN.
+   The emails are sent from the Google account that owns this script. */
+
+var CODE_MINUTES = 15;   // how long a code works
+var CODE_TRIES = 5;      // wrong codes allowed before a new one is needed
+var CODES_PER_HOUR = 3;  // codes one name can ask for in an hour
+
+// Run this once from the Apps Script editor (choose it above, press Run) so
+// Google asks you to allow the script to send the reset emails.
+function allowEmail() {
+  Logger.log("Emails left today: " + MailApp.getRemainingDailyQuota());
+}
+
+// { row, name, pin, email } for the student with this key, or null.
+function studentWithEmail(key) {
+  var student = findStudent(key);
+  if (!student) return null;
+  student.email = unsafe(studentsSheet().getRange(student.row, 5).getValues()[0][0]).trim();
+  return student;
+}
+
+// "d***@gmail.com": enough for the student to recognise, not to read.
+function maskEmail(email) {
+  var at = email.indexOf("@");
+  return at < 1 ? "your email" : email.charAt(0) + "***" + email.slice(at);
+}
+
+// What "Forgot your PIN?" can offer this name, before anything is sent: a code
+// by email (to the address shown half-hidden) or only the teacher.
+function pinOptions(data) {
+  var key = nameKey(data.name);
+  if (!key) return reply({ ok: false, error: "bad-name" });
+  var student = studentWithEmail(key);
+  if (!student) return reply({ ok: false, error: "not-found" });
+  return reply({
+    ok: true,
+    name: student.name,
+    hasPin: !!student.pin,
+    hasEmail: !!student.email,
+    sentTo: student.email ? maskEmail(student.email) : ""
+  });
+}
+
+function sendPinCode(data) {
+  var name = cleanName(data.name);
+  var key = name.toLowerCase();
+  if (!key) return reply({ ok: false, error: "bad-name" });
+  var student = studentWithEmail(key);
+  if (!student) return reply({ ok: false, error: "not-found" });
+  if (!student.pin) return reply({ ok: false, error: "no-pin" });
+  if (!student.email) return reply({ ok: false, error: "no-email" });
+
+  var cache = CacheService.getScriptCache();
+  var countKey = "pinCodes:" + sha(key);
+  var sent = Number(cache.get(countKey)) || 0;
+  if (sent >= CODES_PER_HOUR) return reply({ ok: false, error: "too-many-codes" });
+
+  var code = String(Math.floor(100000 + Math.random() * 900000));
+  try {
+    MailApp.sendEmail({
+      to: student.email,
+      subject: "Hebrew Class: your PIN reset code",
+      body: "Hello " + student.name + ",\n\n" +
+        "Your code to choose a new Hebrew Class PIN is: " + code + "\n\n" +
+        "It works for " + CODE_MINUTES + " minutes. If you didn't ask for it, you can ignore this email; your PIN stays the same.\n"
+    });
+  } catch (err) {
+    return reply({ ok: false, error: "mail-failed" });
+  }
+  cache.put(countKey, String(sent + 1), 3600);
+  cache.put("pinCode:" + sha(key), JSON.stringify({ hash: sha(secret() + "|code|" + key + "|" + code), tries: 0 }), CODE_MINUTES * 60);
+  withLock(function () { logPin(student.name, "Asked for a PIN reset code by email (" + maskEmail(student.email) + ")"); });
+  return reply({ ok: true, sentTo: maskEmail(student.email) });
+}
+
+function resetPinWithCode(data) {
+  var name = cleanName(data.name);
+  var key = name.toLowerCase();
+  var code = String(data.code || "").replace(/\s+/g, "");
+  var pin = String(data.pin || "").trim();
+  if (!key) return reply({ ok: false, error: "bad-name" });
+  if (!/^\d{4,8}$/.test(pin)) return reply({ ok: false, error: "bad-pin" });
+
+  var cache = CacheService.getScriptCache();
+  var codeKey = "pinCode:" + sha(key);
+  var saved = cache.get(codeKey);
+  if (!saved) return reply({ ok: false, error: "code-expired" });
+  saved = JSON.parse(saved);
+  if (saved.hash !== sha(secret() + "|code|" + key + "|" + code)) {
+    saved.tries += 1;
+    if (saved.tries >= CODE_TRIES) cache.remove(codeKey);
+    else cache.put(codeKey, JSON.stringify(saved), CODE_MINUTES * 60);
+    return reply({ ok: false, error: saved.tries >= CODE_TRIES ? "code-expired" : "wrong-code" });
+  }
+
+  var out;
+  withLock(function () {
+    var student = findStudent(key);
+    if (!student) { out = { ok: false, error: "not-found" }; return; }
+    var hash = pinHash(key, pin);
+    studentsSheet().getRange(student.row, 4).setValue(hash);
+    logPin(student.name, "Chose a new PIN with the code from the email");
+    out = { ok: true, name: student.name, hasPin: true, token: tokenFor(key, hash) };
+  });
+  if (out.ok) {
+    cache.remove(codeKey);
+    cache.remove("pinTries:" + sha(key));
+  }
   return reply(out);
 }
 
@@ -300,13 +519,17 @@ function saveResult(data) {
   return reply({ ok: true });
 }
 
-// Everything the Teacher page shows: all quiz results, all practice, all students.
+// Everything the Teacher page shows: all quiz results, all practice, all
+// students (with a temporary PIN not used yet) and the PIN changes.
 function listResults(data) {
   if (!isTeacher(data)) return reply({ ok: false, error: "wrong-passcode" });
   var students = dataRows(studentsSheet()).map(function (r) {
-    return { name: unsafe(r[1]), joinedAt: isoDate(r[0]), hasPin: !!r[3], email: unsafe(r[4]) };
+    return { name: unsafe(r[1]), joinedAt: isoDate(r[0]), hasPin: !!r[3], tempPinSent: !!tempPinOf(r[3]), email: unsafe(r[4]) };
   });
-  return reply({ ok: true, results: readResults(), practice: readPractice(), students: students });
+  var pinChanges = dataRows(namedSheet(PIN_LOG_SHEET, PIN_LOG_HEADERS)).map(function (r) {
+    return { at: isoDate(r[0]), student: unsafe(r[1]), change: unsafe(r[2]) };
+  });
+  return reply({ ok: true, results: readResults(), practice: readPractice(), students: students, pinChanges: pinChanges });
 }
 
 function readResults() {
