@@ -198,8 +198,20 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .subtab:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
 /* Quiz and Word by word: a button that opens the list of lessons, shown below all the buttons */
-.subtab-picker { font-family: inherit; line-height: inherit; cursor: pointer; }
-.subtab-caret { margin-left: 5px; font-size: .75em; }
+.subtab-picker { display: inline-flex; align-items: center; gap: 4px; padding-right: 10px; font-family: inherit; line-height: inherit; cursor: pointer; }
+.subtab-caret {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform .15s;
+}
+.subtab-picker[aria-expanded="true"] .subtab-caret { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .subtab-caret { transition: none; } }
 .lesson-menu {
   position: absolute;
   top: calc(100% + 6px);
@@ -750,6 +762,8 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
   .lesson-head h1 { margin-bottom: 10px; }
   .subtabs { gap: 6px; margin-bottom: 12px; }
   .subtab { padding: 5px 11px; font-size: .88rem; }
+  .subtab-picker { padding-right: 7px; gap: 3px; }
+  .subtab-caret { width: 17px; height: 17px; }
   .study-toolbar { margin-bottom: 10px; }
   .progress-bar { margin-bottom: 12px; }
   .word-card { min-height: 0; gap: 8px; }

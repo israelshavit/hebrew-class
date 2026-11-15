@@ -299,6 +299,16 @@
     return svg;
   }
 
+  // The arrow on a button that opens a list (no filled part).
+  function chevronIcon() {
+    var svg = lineIcon([]);
+    var p = document.createElementNS(SVG_NS, "path");
+    p.setAttribute("d", "M6 9l6 6 6-6");
+    svg.appendChild(p);
+    svg.setAttribute("class", "subtab-caret");
+    return svg;
+  }
+
   function speakerIcon() {
     return lineIcon(["M4 9h4l5-4v14l-5-4H4z", "M16 8.5a4.5 4.5 0 0 1 0 7", "M18.5 6a8 8 0 0 1 0 12"]);
   }
@@ -1018,7 +1028,7 @@
         // Opened from the keyboard: go straight to the list, which comes after the other buttons.
         if (e.detail === 0) (menu.querySelector("a.current") || menu.querySelector("a")).focus();
       }
-    }, [text, el("span", { class: "subtab-caret", "aria-hidden": "true", text: "▾" })]);
+    }, [text, chevronIcon()]);
     return { button: button, menu: menu };
   }
 
