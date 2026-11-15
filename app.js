@@ -954,18 +954,22 @@
     // class are in the top menu, the video is under Resources, and only the
     // sheet (opened from the list of lessons) links back to that list. On the
     // Self study pages the menu is at the top and the title is for screen readers only.
-    // So is it for a student on Live class until this lesson is live.
+    // So is it for a student on Live class until this lesson is live. On the
+    // Quiz and Word by word it shows under the Self study buttons instead, as
+    // the lesson chosen from their lists.
+    var named = tab === "quiz" || tab === "cards";
     var quietTitle = study || (tab === "live" && !isLiveTeacher() && !liveHere(lesson));
+    var title = el("h1", { class: named ? "study-lesson" : quietTitle ? "visually-hidden" : null, text: lesson.name });
     var head = el("div", { class: "lesson-head no-print" }, [
       tab === "sheet" ? el("a", { class: "back", href: "#/", text: "← All lessons" }) : null,
-      el("h1", { class: quietTitle ? "visually-hidden" : null, text: lesson.name })
+      named ? null : title
     ]);
     var body = tab === "quiz" ? renderQuiz(lesson)
       : tab === "cards" ? renderCards(lesson)
       : tab === "resources" ? renderResources(lesson)
       : tab === "live" ? renderLive(lesson)
       : renderSheetTab(lesson);
-    return el("section", null, [head, study ? studyNav(tab, lesson) : null, body]);
+    return el("section", null, [head, study ? studyNav(tab, lesson) : null, named ? title : null, body]);
   }
 
   // The Self study menu. The Quiz, Word by word and Resources belong to a
@@ -1497,7 +1501,7 @@
       + ": multiple choice, then a matching round that counts as one question. Take them in any order, as often as you like."
       + (saving ? " Your highest score is the one that counts for this lesson." : "");
     return el("div", { class: "card" }, [
-      el("h2", { text: "Quiz: " + lesson.name, style: "margin-top:0" }),
+      el("h2", { text: "Choose a quiz", style: "margin-top:0" }), // the lesson's name is above, under the buttons
       el("p", { text: intro }),
       top ? el("p", { class: "quiz-best" }, [
         "Your highest score for this lesson: ",

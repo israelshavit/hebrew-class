@@ -179,6 +179,8 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 /* Lesson header */
 .back { display: inline-block; margin-bottom: 12px; text-decoration: none; }
 .lesson-head h1 { margin-bottom: 12px; }
+/* Quiz and Word by word: the lesson chosen, under the Self study buttons */
+.study-lesson { margin: 0 0 10px; font-size: 1.1rem; line-height: 1.35; }
 
 /* Self study menu */
 .subtabs { position: relative; display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
@@ -763,6 +765,7 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
   .subtabs { gap: 6px; margin-bottom: 12px; }
   .subtab { padding: 5px 11px; font-size: .88rem; }
   .subtab-picker { padding-right: 7px; gap: 3px; }
+  .study-lesson { margin-bottom: 8px; font-size: 1rem; }
   .subtab-caret { width: 17px; height: 17px; }
   .study-toolbar { margin-bottom: 10px; }
   .progress-bar { margin-bottom: 12px; }
