@@ -5,8 +5,7 @@
       "name": "site",
       "runtimeExecutable": "python",
       "runtimeArgs": [
-        "-m",
-        "http.server",
+        ".claude/serve.py",
         "5180"
       ],
       "port": 5180,
@@ -16,8 +15,7 @@
       "name": "site-alt",
       "runtimeExecutable": "python",
       "runtimeArgs": [
-        "-m",
-        "http.server",
+        ".claude/serve.py",
         "5181"
       ],
       "port": 5181,

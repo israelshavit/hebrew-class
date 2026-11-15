@@ -181,7 +181,7 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .lesson-head h1 { margin-bottom: 12px; }
 
 /* Self study menu */
-.subtabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.subtabs { position: relative; display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .subtab {
   padding: 6px 14px;
   border: 1px solid var(--border);
@@ -196,6 +196,44 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .subtab:hover { border-color: var(--accent); }
 .subtab.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark); }
 .subtab:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* Quiz and Word by word: a button that opens the list of lessons, shown below all the buttons */
+.subtab-picker { font-family: inherit; line-height: inherit; cursor: pointer; }
+.subtab-caret { margin-left: 5px; font-size: .75em; }
+.lesson-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: min(420px, 100%);
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .12);
+}
+.lesson-menu[hidden] { display: none; }
+.lesson-menu-title { margin: 4px 10px 6px; color: var(--muted); font-size: .8rem; font-weight: 600; }
+.lesson-menu ul { margin: 0; padding: 0; list-style: none; }
+.lesson-menu a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-decoration: none;
+}
+.lesson-menu a:hover { background: var(--bg); }
+.lesson-menu a.current { background: var(--accent-soft); }
+.lesson-menu a:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+.lesson-menu-text { flex: 1; display: grid; gap: 2px; }
+.lesson-menu-number { color: var(--muted); font-size: .78rem; font-weight: 600; }
+.lesson-menu a.current .lesson-menu-number { color: var(--accent-dark); }
+.lesson-menu-name { font-size: .95rem; font-weight: 600; line-height: 1.3; }
+.lesson-menu-check { color: var(--accent-dark); font-weight: 700; }
 
 /* Resources: the lesson's video */
 .resource-list { display: grid; gap: 10px; }

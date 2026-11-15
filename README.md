@@ -3,7 +3,7 @@
 A small website for a weekly Hebrew class. Each lesson has (Lessons, Self study and Live class in the top menu; Self study and Live class open the lesson last opened, or the latest one):
 
 - **Lesson sheet**: a printable table (English, transliteration, Hebrew) that students print or save as a PDF. The font size shrinks to fit one A4 page; if that would make it too small to read, the sheet moves onto two (or three) pages, splitting between sections.
-- **Self study**: *Word by word* (one phrase per screen with a listen button; the section's explanation is under the buttons), *Resources* (the lesson's video) and the *Quiz*: up to five short quizzes per lesson, each on different phrases, with four English → Hebrew multiple-choice questions and one matching round that counts as one question. Students can take them in any order and as often as they like; a lesson's mark is the highest score among them.
+- **Self study**: the *Quiz* and *Word by word* buttons open a list of lessons; the one chosen is used there and by *Resources* (the lesson's video). *Word by word* shows one phrase per screen with a listen button; the section's explanation is under the buttons. The *Quiz* has up to five short quizzes per lesson, each on different phrases, with four English → Hebrew multiple-choice questions and one matching round that counts as one question. Students can take them in any order and as often as they like; a lesson's mark is the highest score among them.
 - **Live class**: the teacher steps through the words during an online class and every student who joined sees the same word.
 
 Across the whole site (menu at the top of every page):

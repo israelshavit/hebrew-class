@@ -34,7 +34,8 @@
     student: signedInStudent,          // { name, token } once signed in; token is empty without a PIN
     studentName: signedInStudent ? signedInStudent.name : "",
     // forgot: the "Forgot your PIN?" steps while open; choose: choosing a PIN after a temporary one
-    auth: { busy: false, error: "", forgot: null, choose: null },
+    // name, email: what's typed in the sign-in form, kept in memory only
+    auth: { busy: false, error: "", forgot: null, choose: null, name: "", email: "" },
     quiz: null,       // the quiz being taken; null shows the list of quizzes
     quizDone: {},     // best score per "lessonId|quiz number" since the page was opened
     cards: null,
@@ -73,6 +74,20 @@
   function writeSetting(key, value) {
     try { localStorage.setItem(key, value); } catch (e) { /* ignore */ }
   }
+
+  function removeSetting(key) {
+    try { localStorage.removeItem(key); } catch (e) { /* ignore */ }
+  }
+
+  // A student's email and live class are kept only while they're signed in, so
+  // a shared computer opens on an empty sign-in form.
+  function forgetSavedPerson() {
+    removeSetting("hebrewClass.liveEmail");
+    removeSetting("hebrewClass.liveSession");
+  }
+
+  removeSetting("hebrewClass.studentName"); // earlier versions kept the last name typed, even after signing out
+  if (!signedInStudent) forgetSavedPerson();
 
   // The student signed in on this browser, if any.
   function readStudent() {
@@ -438,7 +453,6 @@
     state.student = { name: name, token: token || "" };
     state.studentName = name;
     writeSetting("hebrewClass.student", JSON.stringify(state.student));
-    writeSetting("hebrewClass.studentName", name);
     state.report.data = null;
     state.wotd = null;
   }
@@ -447,6 +461,13 @@
     state.student = null;
     state.studentName = "";
     writeSetting("hebrewClass.student", "");
+    forgetSavedPerson();
+    state.auth.name = "";
+    state.auth.email = "";
+    live.email = "";
+    live.joinedSession = "";
+    live.joinedAs = "";
+    live.joinedThisVisit = false;
     state.report = { data: null, loading: false, error: "" };
     state.quiz = null;
     state.wotd = null;
@@ -477,7 +498,13 @@
     function done(error) {
       auth.busy = false;
       auth.error = error || "";
-      if (!error) loadForRoute();
+      if (!error) {
+        if (email) {
+          live.email = email; // ready for joining the live class
+          writeSetting("hebrewClass.liveEmail", email);
+        }
+        loadForRoute();
+      }
       render();
     }
     if (!config.resultsUrl) { setStudent(name, ""); done(); return; }
@@ -575,7 +602,7 @@
   function renderForgotPin() {
     var auth = state.auth;
     var f = auth.forgot;
-    function back() { auth.forgot = null; render(); }
+    function back() { if (f.name) auth.name = f.name; auth.forgot = null; render(); }
     function sendCode(name) {
       f.name = name;
       f.code = "";
@@ -669,7 +696,6 @@
           auth.forgot = null;
           auth.error = "";
           setStudent(res.name || f.name, res.token);
-          writeSetting("hebrewClass.studentName", res.name || f.name);
           loadForRoute();
         });
       } }, [
@@ -721,8 +747,11 @@
     var t = state.teacher;
     if (auth.forgot) return renderForgotPin();
     if (auth.choose) return renderChoosePin();
-    var nameInput = el("input", { type: "text", id: "signin-name", required: true, maxlength: "60", autocomplete: "name", value: readSetting("hebrewClass.studentName", "") });
-    var emailInput = el("input", { type: "email", id: "signin-email", maxlength: "120", autocomplete: "email", value: readSetting("hebrewClass.liveEmail", "") });
+    // Empty unless typed since the page opened, so the last person's name never shows.
+    var nameInput = el("input", { type: "text", id: "signin-name", required: true, maxlength: "60", autocomplete: "name", value: auth.name,
+      oninput: function (e) { auth.name = e.target.value; } });
+    var emailInput = el("input", { type: "email", id: "signin-email", maxlength: "120", autocomplete: "email", value: auth.email,
+      oninput: function (e) { auth.email = e.target.value; } });
     var pinInput = el("input", { type: "password", id: "signin-pin", inputmode: "numeric", pattern: "[0-9]{3,8}", maxlength: "8", autocomplete: "off", title: "4 to 8 digits, or a 3-digit temporary PIN from your email" });
     var passInput = el("input", { type: "password", id: "signin-passcode", required: true, autocomplete: "current-password" });
 
@@ -736,9 +765,8 @@
           var name = nameInput.value.trim().replace(/\s+/g, " ");
           if (name && !auth.busy) {
             var email = emailInput.value.trim();
-            writeSetting("hebrewClass.studentName", name);
-            writeSetting("hebrewClass.liveEmail", email);
-            live.email = email;
+            auth.name = name;
+            auth.email = email;
             signInStudent(name, pinInput.value.trim(), email);
           }
         }
@@ -916,9 +944,11 @@
     // class are in the top menu, the video is under Resources, and only the
     // sheet (opened from the list of lessons) links back to that list. On the
     // Self study pages the menu is at the top and the title is for screen readers only.
+    // So is it for a student on Live class until this lesson is live.
+    var quietTitle = study || (tab === "live" && !isLiveTeacher() && !liveHere(lesson));
     var head = el("div", { class: "lesson-head no-print" }, [
       tab === "sheet" ? el("a", { class: "back", href: "#/", text: "← All lessons" }) : null,
-      el("h1", { class: study ? "visually-hidden" : null, text: lesson.name })
+      el("h1", { class: quietTitle ? "visually-hidden" : null, text: lesson.name })
     ]);
     var body = tab === "quiz" ? renderQuiz(lesson)
       : tab === "cards" ? renderCards(lesson)
@@ -928,21 +958,79 @@
     return el("section", null, [head, study ? studyNav(tab, lesson) : null, body]);
   }
 
-  // The Self study menu. Word by word, the Quiz and Resources belong to a
+  // The Self study menu. The Quiz, Word by word and Resources belong to a
   // lesson: the one that is open, or the one last opened, or the latest one.
   function studyNav(active, lesson) {
     lesson = lesson || currentLesson();
     function item(key, href, text) {
       return el("a", { class: "subtab" + (active === key ? " active" : ""), href: href, "aria-current": active === key ? "page" : null, text: text });
     }
+    var quiz = lesson ? lessonPicker("quiz", "Quiz", active, lesson) : {};
+    var cards = lesson ? lessonPicker("cards", "Word by word", active, lesson) : {};
     return el("nav", { class: "subtabs no-print", "aria-label": "Self study" }, [
-      lesson ? item("cards", lessonUrl(lesson, "cards"), "Word by word") : null,
+      quiz.button,
+      cards.button,
       item("word", "#/study/word", "Word of the day"),
       item("say", "#/study/say", "How to say"),
-      lesson ? item("quiz", lessonUrl(lesson, "quiz"), "Quiz") : null,
       lesson ? item("resources", lessonUrl(lesson, "resources"), "Resources") : null,
-      item("suggestions", "#/suggestions", "Suggestions")
+      item("suggestions", "#/suggestions", "Suggestions"),
+      quiz.menu, // the lesson lists open below all the buttons
+      cards.menu
     ]);
+  }
+
+  // The Quiz and Word by word buttons open the list of lessons. Choosing one
+  // opens that lesson there, and the other Self study pages follow it.
+  // Returns { button, menu }.
+  function lessonPicker(tab, text, active, current) {
+    var id = "lesson-menu-" + tab;
+    var menu = el("div", { class: "lesson-menu", id: id, hidden: true }, [
+      el("p", { class: "lesson-menu-title", text: "Choose a lesson" }),
+      el("ul", null, lessons.map(function (lesson, i) {
+        var here = lesson === current;
+        return el("li", null, [
+          el("a", {
+            href: lessonUrl(lesson, tab),
+            class: here ? "current" : null,
+            "aria-current": here ? (active === tab ? "page" : "true") : null,
+            onclick: closeLessonMenus // needed when it's the page already open: the address doesn't change
+          }, [
+            el("span", { class: "lesson-menu-text" }, [
+              el("span", { class: "lesson-menu-number", text: "Lesson " + lesson.number + (i === 0 ? " · Latest" : "") }),
+              el("span", { class: "lesson-menu-name", text: lesson.title })
+            ]),
+            here ? el("span", { class: "lesson-menu-check", "aria-hidden": "true", text: "✓" }) : null
+          ])
+        ]);
+      }))
+    ]);
+    var button = el("button", {
+      type: "button",
+      class: "subtab subtab-picker" + (active === tab ? " active" : ""),
+      "aria-expanded": "false",
+      "aria-controls": id,
+      onclick: function (e) {
+        var opening = menu.hidden;
+        closeLessonMenus();
+        if (!opening) return;
+        menu.hidden = false;
+        button.setAttribute("aria-expanded", "true");
+        // Opened from the keyboard: go straight to the list, which comes after the other buttons.
+        if (e.detail === 0) (menu.querySelector("a.current") || menu.querySelector("a")).focus();
+      }
+    }, [text, el("span", { class: "subtab-caret", "aria-hidden": "true", text: "▾" })]);
+    return { button: button, menu: menu };
+  }
+
+  // Closes an open lesson list; returns its button, or null if none was open.
+  function closeLessonMenus() {
+    var opener = null;
+    document.querySelectorAll(".lesson-menu:not([hidden])").forEach(function (menu) {
+      menu.hidden = true;
+      opener = document.querySelector('[aria-controls="' + menu.id + '"]');
+      if (opener) opener.setAttribute("aria-expanded", "false");
+    });
+    return opener;
   }
 
   // The lesson's video (more kinds of resource can be added here later).
@@ -1816,7 +1904,7 @@
       options,
       wrong ? el("p", { class: "feedback bad", role: "status", text: "Not quite. Look at the word again, then try once more." }) : null,
       wrong ? el("div", { class: "actions" }, [
-        el("button", { class: "btn primary", type: "button", text: "See the word again", onclick: function () { w.step = "learn"; render(); } })
+        el("button", { class: "btn primary", type: "button", text: "Back", onclick: function () { w.step = "learn"; render(); } })
       ]) : null
     ]);
   }
@@ -2634,7 +2722,9 @@
     if (!config.resultsUrl) {
       return el("p", { class: "notice", text: "The live class needs the Google script connected (see README.md)." });
     }
-    var parts = [el("div", { class: "toolbar study-toolbar no-print" }, [niqqudToggle()])];
+    var parts = [];
+    // Students see the vowel marks switch only once there are words to show.
+    if (isLiveTeacher() || liveHere(lesson)) parts.push(el("div", { class: "toolbar study-toolbar no-print" }, [niqqudToggle()]));
     if (live.error) parts.push(el("p", { class: "notice error", text: live.error }));
     parts.push(isLiveTeacher() ? renderLiveTeacher(lesson) : renderLiveStudent(lesson));
     return el("div", { class: "live-view" }, parts);
@@ -3242,7 +3332,16 @@
 
   window.addEventListener("hashchange", onRouteChange);
   window.addEventListener("resize", scalePage);
+  // A lesson list closes with a click elsewhere or Escape.
+  document.addEventListener("click", function (e) {
+    if (!(e.target.closest && e.target.closest(".subtab-picker, .lesson-menu"))) closeLessonMenus();
+  });
   document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") {
+      var opener = closeLessonMenus();
+      if (opener) { opener.focus(); return; }
+    }
+    if (document.querySelector(".lesson-menu:not([hidden])")) return; // arrows don't turn cards behind an open list
     if (state.route.view !== "lesson" || (state.route.tab !== "cards" && state.route.tab !== "live")) return;
     if (e.altKey || e.ctrlKey || e.metaKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
     var move = state.route.tab === "live" ? moveLive : moveCard;
