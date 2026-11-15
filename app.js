@@ -29,6 +29,7 @@
 
   var state = {
     route: { view: "home" },
+    lessonId: null,   // the lesson last opened; Self study and Live class follow it
     niqqud: readSetting("hebrewClass.niqqud", "1") !== "0",
     student: signedInStudent,          // { name, token } once signed in; token is empty without a PIN
     studentName: signedInStudent ? signedInStudent.name : "",
@@ -269,21 +270,26 @@
 
   var SVG_NS = "http://www.w3.org/2000/svg";
 
-  function speakerIcon() {
+  // A 24×24 line icon; the first path is filled in.
+  function lineIcon(paths) {
     var svg = document.createElementNS(SVG_NS, "svg");
     svg.setAttribute("viewBox", "0 0 24 24");
     svg.setAttribute("aria-hidden", "true");
-    [
-      "M4 9h4l5-4v14l-5-4H4z",
-      "M16 8.5a4.5 4.5 0 0 1 0 7",
-      "M18.5 6a8 8 0 0 1 0 12"
-    ].forEach(function (d, i) {
+    paths.forEach(function (d, i) {
       var p = document.createElementNS(SVG_NS, "path");
       p.setAttribute("d", d);
       if (i === 0) p.setAttribute("class", "fill");
       svg.appendChild(p);
     });
     return svg;
+  }
+
+  function speakerIcon() {
+    return lineIcon(["M4 9h4l5-4v14l-5-4H4z", "M16 8.5a4.5 4.5 0 0 1 0 7", "M18.5 6a8 8 0 0 1 0 12"]);
+  }
+
+  function micIcon() {
+    return lineIcon(["M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z", "M5.5 11a6.5 6.5 0 0 0 13 0", "M12 17.5V21", "M8.5 21h7"]);
   }
 
   // texts: one Hebrew string, or several (male and female forms) read one after another.
@@ -325,8 +331,13 @@
     return en + (form.g === "m" ? " (male)" : " (female)");
   }
 
+  // A lesson's tabs besides its sheet, as they appear in the address.
+  var LESSON_TABS = ["cards", "quiz", "resources", "live"];
+  // The ones that sit in the Self study menu.
+  var STUDY_TABS = ["cards", "quiz", "resources"];
+
   function lessonUrl(lesson, tab) {
-    return "#/lesson/" + encodeURIComponent(lesson.id) + (tab === "quiz" || tab === "cards" || tab === "live" ? "/" + tab : "");
+    return "#/lesson/" + encodeURIComponent(lesson.id) + (LESSON_TABS.indexOf(tab) >= 0 ? "/" + tab : "");
   }
 
   /* ---------- Routing ---------- */
@@ -342,14 +353,24 @@
       return {
         view: "lesson",
         lessonId: decodeURIComponent(parts[1]),
-        tab: parts[2] === "quiz" || parts[2] === "cards" || parts[2] === "live" ? parts[2] : "sheet"
+        tab: LESSON_TABS.indexOf(parts[2]) >= 0 ? parts[2] : "sheet"
       };
     }
     return { view: "home" };
   }
 
+  function rememberLesson() {
+    if (state.route.view === "lesson" && findLesson(state.route.lessonId)) state.lessonId = state.route.lessonId;
+  }
+
+  // The lesson Self study and Live class are about: the one last opened, or the latest.
+  function currentLesson() {
+    return (state.lessonId && findLesson(state.lessonId)) || lessons[0] || null;
+  }
+
   function onRouteChange() {
     state.route = parseHash();
+    rememberLesson();
     if (state.quiz && state.quiz.lessonId !== state.route.lessonId) state.quiz = null;
     if (state.cards && state.cards.lessonId !== state.route.lessonId) state.cards = null;
     stopListening();
@@ -791,18 +812,22 @@
     // On this computer the site talks to the test copy of the sheet; say so.
     if (config.testing) user.appendChild(el("span", { class: "test-badge", title: "Using the test copy of the Google Sheet", text: "Test data" }));
     var view = state.route.view;
-    function link(href, text, active) {
-      return el("a", { class: "mainnav-link" + (active ? " active" : ""), href: href, "aria-current": active ? "page" : null, text: text });
+    function link(href, text, active, icon) {
+      return el("a", { class: "mainnav-link" + (active ? " active" : ""), href: href, "aria-current": active ? "page" : null }, [icon, text]);
     }
     if (!signedIn()) {
       user.appendChild(el("a", { class: "topnav-out", href: "#/teacher", text: "Teacher" }));
       return;
     }
-    var inStudy = view === "study" || (view === "lesson" && (state.route.tab === "cards" || state.route.tab === "quiz"));
+    var tab = view === "lesson" ? state.route.tab : "";
+    var inStudy = view === "study" || view === "suggestions" || STUDY_TABS.indexOf(tab) >= 0;
+    var lesson = currentLesson();
+    // A running class (known once the Live class page has checked) is where Live class goes.
+    var liveLesson = (live.remote && live.remote.running && findLesson(live.remote.lessonId)) || lesson;
     nav.appendChild(el("div", { class: "mainnav-inner" }, [
-      link("#/", "Lessons", view === "home" || (view === "lesson" && !inStudy)),
-      link("#/study", "Self study", inStudy),
-      link("#/suggestions", "Suggestions", view === "suggestions"),
+      link("#/", "Lessons", view === "home" || tab === "sheet"),
+      link(lesson ? lessonUrl(lesson, "cards") : "#/study", "Self study", inStudy),
+      link(liveLesson ? lessonUrl(liveLesson, "live") : "#/", "Live class", tab === "live", liveDot()),
       isTeacher()
         ? link("#/teacher", "Teacher", view === "teacher" || view === "progress")
         : link("#/progress", "My progress", view === "progress"),
@@ -815,7 +840,7 @@
   function renderHome() {
     var wrap = el("section", null, [
       el("h1", { text: "Weekly lessons" }),
-      el("p", { class: "lede", text: "Open a lesson to print its one-page sheet or take the quiz." })
+      el("p", { class: "lede", text: "Open a lesson to see and print its one-page sheet." })
     ]);
     if (state.loadErrors.length) {
       wrap.appendChild(el("p", { class: "notice error", text: "Some lessons could not be loaded: " + state.loadErrors.join(", ") }));
@@ -828,7 +853,7 @@
     lessons.forEach(function (lesson, i) {
       list.appendChild(el("li", null, [
         el("a", { class: "lesson-card", href: lessonUrl(lesson, "sheet") }, [
-          el("span", { class: "lesson-date", text: formatDate(lesson.date) + (i === 0 ? " · Latest" : "") }),
+          i === 0 ? el("span", { class: "lesson-latest", text: "Latest" }) : null,
           el("span", { class: "lesson-title", text: lesson.name }),
           el("span", { class: "lesson-meta", text: lesson.sections.reduce(function (n, sec) { return n + sec.rows.length; }, 0) + " phrases in " + lesson.sections.length + " sections" })
         ])
@@ -886,32 +911,27 @@
 
   function renderLesson(lesson) {
     var tab = state.route.tab;
-    var study = tab === "cards" || tab === "quiz";
+    var study = STUDY_TABS.indexOf(tab) >= 0;
+    // Kept short so the word card fits on a phone screen. Self study and Live
+    // class are in the top menu, the video is under Resources, and only the
+    // sheet (opened from the list of lessons) links back to that list. On the
+    // Self study pages the menu is at the top and the title is for screen readers only.
     var head = el("div", { class: "lesson-head no-print" }, [
-      el("a", { class: "back", href: "#/", text: "← All lessons" }),
-      el("h1", { text: lesson.name }),
-      el("p", { class: "lesson-date", text: formatDate(lesson.date) }),
-      lesson.video ? el("p", { class: "lesson-video" }, [
-        "Video: ",
-        el("a", { href: lesson.video, target: "_blank", rel: "noopener", text: lesson.videoTitle || lesson.video })
-      ]) : null,
-      el("nav", { class: "tabs", "aria-label": "Lesson" }, [
-        el("a", { class: "tab" + (tab === "sheet" ? " active" : ""), href: lessonUrl(lesson, "sheet"), "aria-current": tab === "sheet" ? "page" : null, text: "Lesson sheet" }),
-        el("a", { class: "tab" + (study ? " active" : ""), href: lessonUrl(lesson, "cards"), "aria-current": study ? "page" : null, text: "Self study" }),
-        el("a", { class: "tab" + (tab === "live" ? " active" : ""), href: lessonUrl(lesson, "live"), "aria-current": tab === "live" ? "page" : null }, [
-          liveDot(),
-          "Live class"
-        ])
-      ])
+      tab === "sheet" ? el("a", { class: "back", href: "#/", text: "← All lessons" }) : null,
+      el("h1", { class: study ? "visually-hidden" : null, text: lesson.name })
     ]);
-    var body = tab === "quiz" ? renderQuiz(lesson) : tab === "cards" ? renderCards(lesson) : tab === "live" ? renderLive(lesson) : renderSheetTab(lesson);
+    var body = tab === "quiz" ? renderQuiz(lesson)
+      : tab === "cards" ? renderCards(lesson)
+      : tab === "resources" ? renderResources(lesson)
+      : tab === "live" ? renderLive(lesson)
+      : renderSheetTab(lesson);
     return el("section", null, [head, study ? studyNav(tab, lesson) : null, body]);
   }
 
-  // The Self study menu. Word by word and the Quiz belong to a lesson: the one
-  // that is open, or the latest one.
+  // The Self study menu. Word by word, the Quiz and Resources belong to a
+  // lesson: the one that is open, or the one last opened, or the latest one.
   function studyNav(active, lesson) {
-    lesson = lesson || lessons[0];
+    lesson = lesson || currentLesson();
     function item(key, href, text) {
       return el("a", { class: "subtab" + (active === key ? " active" : ""), href: href, "aria-current": active === key ? "page" : null, text: text });
     }
@@ -919,7 +939,30 @@
       lesson ? item("cards", lessonUrl(lesson, "cards"), "Word by word") : null,
       item("word", "#/study/word", "Word of the day"),
       item("say", "#/study/say", "How to say"),
-      lesson ? item("quiz", lessonUrl(lesson, "quiz"), "Quiz") : null
+      lesson ? item("quiz", lessonUrl(lesson, "quiz"), "Quiz") : null,
+      lesson ? item("resources", lessonUrl(lesson, "resources"), "Resources") : null,
+      item("suggestions", "#/suggestions", "Suggestions")
+    ]);
+  }
+
+  // The lesson's video (more kinds of resource can be added here later).
+  function renderResources(lesson) {
+    var items = [];
+    if (lesson.video) {
+      items.push(el("a", { class: "resource", href: lesson.video, target: "_blank", rel: "noopener" }, [
+        el("span", { class: "resource-icon", "aria-hidden": "true", text: "▶" }),
+        el("span", { class: "resource-text" }, [
+          el("span", { class: "resource-kind", text: "Video" }),
+          el("span", { class: "resource-title", text: lesson.videoTitle || lesson.video }),
+          el("span", { class: "resource-meta", text: "Opens in a new tab" })
+        ])
+      ]));
+    }
+    return el("div", { class: "resources" }, [
+      el("h2", { text: "Resources", style: "margin-top:0" }),
+      items.length
+        ? el("div", { class: "resource-list" }, items)
+        : el("p", { class: "notice", text: "No resources for this lesson yet." })
     ]);
   }
 
@@ -1001,7 +1044,7 @@
     return el("div", { class: "sheet" }, [
       first ? el("h2", { class: "sheet-title", text: lesson.title }) : null,
       el("p", { class: "sheet-subtitle", text: (first
-        ? [lesson.subtitle, formatDate(lesson.date), pageLabel]
+        ? [lesson.subtitle, pageLabel]
         : [lesson.title, pageLabel]).filter(Boolean).join(" · ") }),
       table,
       last && lesson.notes ? el("p", { class: "sheet-notes" }, [el("strong", { text: "Notes: " }), lesson.notes]) : null,
@@ -1149,10 +1192,11 @@
     ]);
 
     return el("div", { class: "cards-view" }, [
-      el("div", { class: "toolbar no-print", style: "margin-bottom:16px" }, [niqqudToggle()]),
+      el("div", { class: "toolbar study-toolbar no-print" }, [niqqudToggle()]),
       el("div", { class: "progress-bar", "aria-hidden": "true" }, [el("span", { style: "width:" + pct + "%" })]),
       card,
       nav,
+      sectionExplanation(list[c.index]),
       el("p", { class: "hint card-hint", text: "Tip: use the ← → arrow keys to move between words." })
     ]);
   }
@@ -1162,9 +1206,14 @@
   function wordCard(item) {
     return el("div", { class: "card word-card" }, [
       el("p", { class: "card-section", text: item.sectionNo + ". " + item.section.title }),
-      item.section.explanation ? el("p", { class: "card-explain", text: heb(item.section.explanation) }) : null,
       cardBody(item.row)
     ]);
+  }
+
+  // The section's explanation goes under the buttons, so on a phone the word
+  // and Next are on screen without scrolling.
+  function sectionExplanation(item) {
+    return item.section.explanation ? el("p", { class: "card-explain", text: heb(item.section.explanation) }) : null;
   }
 
   // English, then each Hebrew form with its transliteration and a listen button.
@@ -1178,8 +1227,11 @@
       ]);
     });
 
-    return el("div", { class: "card-body" }, [
-      el("p", { class: "card-en", text: row.en.replace(/\s*\((to )?m\/f\)/, "") }),
+    var en = row.en.replace(/\s*\((to )?m\/f\)/, "");
+    // Whole sentences get smaller type on a phone, so Next still fits on screen.
+    var long = en.length > 30 || row.forms.some(function (f) { return plain(f.he).length > 24; });
+    return el("div", { class: "card-body" + (long ? " long" : "") }, [
+      el("p", { class: "card-en", text: en }),
       el("div", { class: "card-forms" + (forms.length > 1 ? " two" : "") }, forms)
     ]);
   }
@@ -1310,7 +1362,7 @@
       var item = quiz.items[quiz.index];
       body = item.type === "choice" ? renderChoice(quiz, item) : renderMatch(quiz, item);
     }
-    return el("div", null, [el("div", { class: "toolbar no-print", style: "margin-bottom:16px" }, [niqqudToggle()]), body]);
+    return el("div", null, [el("div", { class: "toolbar study-toolbar no-print" }, [niqqudToggle()]), body]);
   }
 
   // The student's best score on each quiz of this lesson: from their report,
@@ -1679,8 +1731,8 @@
   function renderStudy() {
     var tab = state.route.tab;
     return el("section", null, [
-      el("h1", { text: "Self study" }),
-      el("p", { class: "lede", text: "Practise on your own, a few minutes at a time." }),
+      // No visible title: the menu sits at the top, so the word fits on a phone.
+      el("h1", { class: "visually-hidden", text: "Self study" }),
       studyNav(tab, null),
       tab === "say" ? renderSay() : renderWordOfDay()
     ]);
@@ -1693,7 +1745,6 @@
       state.wotd = entry && {
         day: day,
         row: entry.row,
-        topic: entry.section.title,
         form: entry.row.forms[0],
         step: "learn",
         options: null,
@@ -1704,7 +1755,7 @@
     }
     var w = state.wotd;
     if (!w) return el("p", { class: "notice", text: "There is no word of the day yet." });
-    var toolbar = el("div", { class: "toolbar no-print", style: "margin-bottom:16px" }, [niqqudToggle()]);
+    var toolbar = el("div", { class: "toolbar study-toolbar no-print" }, [niqqudToggle()]);
     return el("div", { class: "cards-view" }, [toolbar, w.step === "ask" ? renderWordCheck(w) : renderWordLearn(w)]);
   }
 
@@ -1719,8 +1770,7 @@
     return el("div", null, [
       el("div", { class: "card word-card wotd-card" }, [
         el("p", { class: "card-section", text: "Word of the day · " + formatDate(w.day) }),
-        cardBody(w.row),
-        el("span", { class: "card-gender", text: w.topic })
+        cardBody(w.row)
       ]),
       w.done ? el("p", { class: "notice good", role: "status", text: "Practised today. Come back tomorrow for a new word." }) : null,
       savedText ? el("p", { class: "send-status" + (w.saved === "saving" || w.saved === "saved" ? "" : " bad"), text: savedText }) : null,
@@ -1745,16 +1795,20 @@
   // The word is hidden; pick its Hebrew from four.
   function renderWordCheck(w) {
     var wrong = w.picked !== null && w.picked !== w.form;
+    // Each choice has its own listen button, beside it as in the lesson quiz.
     var options = el("div", { class: "options" }, w.options.map(function (opt) {
-      return el("button", {
-        class: "option" + (wrong && opt === w.picked ? " wrong" : ""),
-        type: "button",
-        lang: "he",
-        dir: "rtl",
-        disabled: wrong,
-        onclick: function () { answerWord(w, opt); },
-        text: heb(opt.he)
-      });
+      return el("div", { class: "option-row" }, [
+        el("button", {
+          class: "option" + (wrong && opt === w.picked ? " wrong" : ""),
+          type: "button",
+          lang: "he",
+          dir: "rtl",
+          disabled: wrong,
+          onclick: function () { answerWord(w, opt); },
+          text: heb(opt.he)
+        }),
+        speakButton(opt.he, "option-speak")
+      ]);
     }));
     return el("div", { class: "card" }, [
       el("p", { class: "quiz-progress", text: "Word of the day · Which one is it?" }),
@@ -1816,18 +1870,12 @@
     }, [
       el("div", { class: "field wide" }, [
         el("label", { for: "say-text", text: "A word or short phrase in English" }),
-        input
+        // The microphone sits at the end of the box: say the phrase instead of typing it.
+        el("div", { class: "say-input" + (Recognition ? " with-mic" : "") }, [input, Recognition ? micButton(say) : null])
       ]),
+      say.listening ? el("p", { class: "say-listening", role: "status", text: "Listening… say the phrase in English. Tap the microphone to stop." }) : null,
       el("div", { class: "actions" }, [
-        el("button", { class: "btn primary", type: "submit", disabled: say.busy, text: say.busy ? "Translating…" : "Translate to Hebrew" }),
-        Recognition ? el("button", {
-          class: "btn" + (say.listening ? " listening" : ""),
-          type: "button",
-          disabled: say.busy,
-          "aria-pressed": say.listening ? "true" : "false",
-          onclick: function () { if (say.listening) stopListening(); else startListening(); },
-          text: say.listening ? "Listening… tap to stop" : "Say it instead"
-        }) : null
+        el("button", { class: "btn primary", type: "submit", disabled: say.busy, text: say.busy ? "Translating…" : "Translate to Hebrew" })
       ]),
       Recognition ? null : el("p", { class: "hint", text: "To say the phrase instead of typing it, open the site in Chrome, Edge or Safari." }),
       say.error ? el("p", { class: "notice error", role: "alert", text: say.error }) : null
@@ -1846,6 +1894,20 @@
     ]);
   }
 
+  function micButton(say) {
+    var btn = el("button", {
+      class: "mic-btn" + (say.listening ? " listening" : ""),
+      type: "button",
+      disabled: say.busy,
+      title: say.listening ? "Stop listening" : "Say it instead",
+      "aria-label": say.listening ? "Stop listening" : "Say it instead of typing",
+      "aria-pressed": say.listening ? "true" : "false",
+      onclick: function () { if (say.listening) stopListening(); else startListening(); }
+    });
+    btn.appendChild(micIcon());
+    return btn;
+  }
+
   function translatePhrase(text) {
     var say = state.say;
     text = String(text || "").trim().replace(/\s+/g, " ").slice(0, SAY_MAX);
@@ -1855,8 +1917,13 @@
     say.error = "";
     render();
     callBackend({ action: "translate", text: text }).then(function (res) {
-      if (res && res.ok && res.hebrew) say.result = { text: res.text || text, hebrew: res.hebrew };
-      else say.error = backendMessage(res, "Couldn't translate that. Try again in a moment.");
+      if (res && res.ok && res.hebrew) {
+        say.result = { text: res.text || text, hebrew: res.hebrew };
+        // The English stays on the result card; the box is ready for the next phrase.
+        if (say.text === text) say.text = "";
+      } else {
+        say.error = backendMessage(res, "Couldn't translate that. Try again in a moment.");
+      }
     }, function () {
       say.error = "Couldn't reach the translator. Check your connection and try again.";
     }).then(function () {
@@ -1962,7 +2029,9 @@
 
   function renderSuggestions() {
     var box = state.suggestions;
+    // The Self study menu stays at the top, in the same place as on its other pages.
     var wrap = el("section", null, [
+      studyNav("suggestions", null),
       el("h1", { text: "Suggestions box" }),
       el("p", { class: "lede", text: "Ideas to improve this site, or topics you'd like in a lesson. Everyone in the class can read the suggestions and the teacher's responses." })
     ]);
@@ -2388,9 +2457,9 @@
     return !!(live.remote && live.remote.running && live.remote.lessonId === lesson.id);
   }
 
+  // On while a class is running, as last seen by the Live class page.
   function liveDot() {
-    var lesson = state.route.lessonId && findLesson(state.route.lessonId);
-    var on = lesson && liveHere(lesson);
+    var on = !!(live.remote && live.remote.running);
     return el("span", { class: "live-dot" + (on ? " on" : ""), "aria-hidden": "true" });
   }
 
@@ -2565,7 +2634,7 @@
     if (!config.resultsUrl) {
       return el("p", { class: "notice", text: "The live class needs the Google script connected (see README.md)." });
     }
-    var parts = [el("div", { class: "toolbar no-print", style: "margin-bottom:16px" }, [niqqudToggle()])];
+    var parts = [el("div", { class: "toolbar study-toolbar no-print" }, [niqqudToggle()])];
     if (live.error) parts.push(el("p", { class: "notice error", text: live.error }));
     parts.push(isLiveTeacher() ? renderLiveTeacher(lesson) : renderLiveStudent(lesson));
     return el("div", { class: "live-view" }, parts);
@@ -2594,6 +2663,8 @@
         "Following your teacher · " + (index + 1) + " / " + list.length
       ]));
     }
+    var explanation = sectionExplanation(list[index]);
+    if (explanation) nodes.push(explanation);
     return nodes;
   }
 
@@ -3091,7 +3162,6 @@
     var head = el("tr", null, [el("th", { scope: "col", text: "Student" })].concat(lessonIds.map(function (id) {
       var lesson = findLesson(id);
       return el("th", { scope: "col" }, [
-        el("span", { class: "col-date", text: lesson ? formatDate(lesson.date) : "" }),
         el("span", { class: "col-title", text: lesson ? lesson.name : lessonTitles[id] || id })
       ]);
     })));
@@ -3185,6 +3255,7 @@
     loadLessons(function () {
       lessons.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
       state.route = parseHash();
+      rememberLesson();
       loadForRoute();
       render();
       startLivePolling();

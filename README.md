@@ -1,16 +1,16 @@
 # Hebrew Class
 
-A small website for a weekly Hebrew class. Each lesson has:
+A small website for a weekly Hebrew class. Each lesson has (Lessons, Self study and Live class in the top menu; Self study and Live class open the lesson last opened, or the latest one):
 
 - **Lesson sheet**: a printable table (English, transliteration, Hebrew) that students print or save as a PDF. The font size shrinks to fit one A4 page; if that would make it too small to read, the sheet moves onto two (or three) pages, splitting between sections.
-- **Self study**: *Word by word* (one phrase per screen with a listen button) and the *Quiz*: up to five short quizzes per lesson, each on different phrases, with four English → Hebrew multiple-choice questions and one matching round that counts as one question. Students can take them in any order and as often as they like; a lesson's mark is the highest score among them.
+- **Self study**: *Word by word* (one phrase per screen with a listen button; the section's explanation is under the buttons), *Resources* (the lesson's video) and the *Quiz*: up to five short quizzes per lesson, each on different phrases, with four English → Hebrew multiple-choice questions and one matching round that counts as one question. Students can take them in any order and as often as they like; a lesson's mark is the highest score among them.
 - **Live class**: the teacher steps through the words during an online class and every student who joined sees the same word.
 
 Across the whole site (menu at the top of every page):
 
 - **Sign-in**: students sign in with their name; an email and a PIN are optional. The email is saved on the **Students** tab of your sheet. The teacher signs in with the teacher passcode.
 - **Self study** also has the *Word of the day* (one word a day about family or something positive, the same for everyone, with a one-question check; the words are in `words/daily-words.js`, and a word already used in a lesson is skipped) and *How to say* (type or say a short English phrase and get Google's Hebrew translation with audio).
-- **Suggestions**: students suggest improvements or lesson topics; everyone sees the list and the teacher's responses.
+- **Suggestions** (in the Self study menu): students suggest improvements or lesson topics; everyone sees the list and the teacher's responses.
 - **My progress**: each student's quiz scores and Word of the day practice, lesson by lesson and week by week, with the phrases they miss most. The teacher sees everyone's on the Teacher page, with the class's totals for the week and its most missed phrases.
 - **Download PDF** on a report opens the browser's print window; choose "Save as PDF" there. The teacher can save the class report or one student's.
 - **Share** (in the top menu) sends the site's link (`siteUrl` in `config.js`) by the phone's share menu (on phones and tablets), WhatsApp, email or a copied link.
@@ -22,7 +22,7 @@ There is no build step. Open `index.html` in a browser to try it locally.
 1. Copy a file in `lessons/` and name it `YYYY-MM-DD-topic.js`.
 2. Fill in its rows. A row is `["English", "Transliteration", "Hebrew"]`. For male/female forms use
    `["English (m/f)", ["translit m", "translit f"], ["Hebrew m", "Hebrew f"]]`; write `(to m/f)` when the forms depend on who you're talking to.
-   A section can have an `explanation` (shown above its phrases on the sheet and on each word card). Set `video` (and `videoTitle`) to link the lesson's video.
+   A section can have an `explanation` (shown above its phrases on the sheet, and under the buttons in Word by word). Set `video` (and `videoTitle`) to link the lesson's video: it appears at the end of the sheet and under Self study → Resources.
 3. Add the file name (without `.js`) to `lessons/index.js`. Lessons are numbered by date: the oldest is shown as "Lesson 1".
 4. Commit and push. GitHub Pages updates the site in a minute or two.
 
@@ -56,7 +56,7 @@ If you change `Code.gs` later (including the passcode), paste the new file into 
 
 ## Running a live class
 
-1. Sign in as the teacher, open the lesson and go to the **Live class** tab.
+1. Sign in as the teacher, open the lesson and choose **Live class** in the top menu.
 2. Press **Start live class** and send students the link to that page.
 3. Students sign in, check their name (email is optional) and press **Join the class**. Their names appear under **Live now**, and each join is saved on the **Attendance** tab of your Google Sheet.
 4. Move with **Next word** / **Previous** or the ← → arrow keys. Students' screens follow within a few seconds (they check every 2–3 seconds through the Google script). Each student can press 🔊 to hear the word.
@@ -64,4 +64,4 @@ If you change `Code.gs` later (including the passcode), paste the new file into 
 
 Students can only join while a class is running. Names and emails aren't verified; they identify who attended.
 
-The live class uses the same Google script as the quiz results, so after updating `Code.gs` paste the new version into Apps Script and deploy a new version (see above). Until then the Live class tab says it can't reach the class service.
+The live class uses the same Google script as the quiz results, so after updating `Code.gs` paste the new version into Apps Script and deploy a new version (see above). Until then the Live class page says it can't reach the class service.
