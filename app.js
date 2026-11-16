@@ -480,7 +480,6 @@
   function resetBoard() {
     state.board.data = null;
     state.board.at = 0;
-    removeSetting(BOARD_SAVED);
   }
 
   function signOut() {
@@ -498,6 +497,7 @@
     state.quiz = null;
     state.wotd = null;
     resetBoard();
+    forgetMyPoints();
     var t = state.teacher;
     t.passcode = "";
     t.board = null;
@@ -925,9 +925,10 @@
      Last week's champion and this week's top 3, from the Google script, which
      counts points for effort (the rules are in "How to earn points" below).
      The script takes a second or two to answer, so the browser keeps the last
-     board it saw and shows that straight away while it asks again. With no
-     saved board the card stays hidden until the script answers, and with a
-     script from before the board. */
+     board it saw and shows that straight away while it asks again, also after
+     signing out and in. A student's own points in it are shown only to that
+     student, and signing out removes them. With no saved board the card stays
+     hidden until the script answers, and with a script from before the board. */
 
   var BOARD_REFRESH_MS = 60000;
   var BOARD_SAVED = "hebrewClass.board";
@@ -938,15 +939,32 @@
     return state.student ? "student:" + studentKey(state.student.name) : "teacher";
   }
 
-  // The board this browser saw last, if it was read for whoever is signed in now
-  // and is from this week (the week starts on Sunday).
-  function savedBoard() {
+  function readSavedBoard() {
     try {
       var saved = JSON.parse(readSetting(BOARD_SAVED, "") || "null");
-      var sunday = dayKey(addDays(new Date(), -new Date().getDay()));
-      if (saved && saved.owner === boardOwner() && saved.data && saved.data.weekStart === sunday) return saved.data;
-    } catch (e) { /* ignore */ }
-    return null;
+      return saved && saved.data ? saved : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // The board this browser saw last, if it is from this week (the week starts
+  // on Sunday), with "Your points" only if it was read for whoever is signed in now.
+  function savedBoard() {
+    var saved = readSavedBoard();
+    var sunday = dayKey(addDays(new Date(), -new Date().getDay()));
+    if (!saved || saved.data.weekStart !== sunday) return null;
+    if (saved.owner !== boardOwner()) saved.data.me = null;
+    return saved.data;
+  }
+
+  // Signing out keeps the saved board everyone sees, for the next sign-in,
+  // but not the student's own points.
+  function forgetMyPoints() {
+    var saved = readSavedBoard();
+    if (!saved) return;
+    saved.data.me = null;
+    writeSetting(BOARD_SAVED, JSON.stringify({ owner: "", data: saved.data }));
   }
 
   function loadBoard() {
@@ -3111,7 +3129,8 @@
       t.boardError = "Couldn't reach the class service. Try again.";
     }).then(function () {
       t.boardBusy = "";
-      resetBoard(); // the Lessons page on this device shows the change straight away
+      resetBoard(); // the Lessons page on this device shows the change straight away,
+      removeSetting(BOARD_SAVED); // without the saved board showing a hidden name first
       render();
     });
   }
