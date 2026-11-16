@@ -57,15 +57,15 @@ If you change `Code.gs` later (including the passcode), paste the new file into 
 
 ## Championship board
 
-The top of the Lessons page shows **last week's Hebrew champion** and **this week's top 3** (everyone tied for a place is shown, up to 5 names). A signed-in student also sees their own points for the week. Points reward effort, so a student who practises often can beat a stronger one who rarely logs in:
+The top of the Lessons page shows **last week's Hebrew champion** and **this week's top 3** (everyone tied for a place is shown, up to 5 names). A signed-in student also sees their own points for the week; opening that line shows them broken down into quizzes, Word of the day and live class (the breakdown needs the latest `Code.gs`; with an older one the student sees just the total). Points reward effort, so a student who practises often can beat a stronger one who rarely logs in:
 
 - 1 point for each correct quiz answer, counting the best try at each quiz that week (retaking a quiz can raise it, not add to it)
 - 2 points for each day the Word of the day is practised
 - 5 points for each live class joined
 
-Weeks run Sunday to Saturday in the Google Sheet's time zone (File → Settings), and everyone starts each week at zero. The Google script works the points out from the **Results**, **Practice** and **Attendance** tabs (at most once a minute) and sends only names and points, never emails or PINs.
+Weeks run Sunday to Saturday in the Google Sheet's time zone (File → Settings), and everyone starts each week at zero. The Google script works the points out from the **Results**, **Practice** and **Attendance** tabs (at most once a minute, but straight away after a quiz, Word of the day or class join, so a student sees their new points as soon as they're back on the Lessons page) and sends only names and points, never emails or PINs.
 
-On the Teacher page, **Championship board** lists every student's points this week and last week. **Hide** keeps a name off the board everyone sees, for test names or a student who'd rather not appear; **Show** puts it back. The hidden names are kept in the script's properties, not in the sheet.
+On the Teacher page, **Championship board** lists every student's points this week and last week. **Hide** keeps a name off the board everyone sees, for test names or a student who'd rather not appear (that student still sees their own points, with a note that their name is hidden); **Show** puts it back. The hidden names are kept in the script's properties, not in the sheet.
 
 The board needs the version of `Code.gs` that has it: paste it into Apps Script and deploy a new version (see above). Until then the Lessons page simply has no board, and the Teacher page says how to switch it on.
 

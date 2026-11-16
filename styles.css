@@ -184,6 +184,12 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .champ-points { flex: none; color: var(--muted); font-size: .9rem; font-variant-numeric: tabular-nums; }
 .champ-empty { margin: 0; color: var(--muted); }
 .champ-me { margin: 10px 0 0; color: var(--accent-dark); font-weight: 600; }
+.champ-me-more { margin-top: 10px; }
+.champ-me-more summary { color: var(--accent-dark); font-weight: 600; cursor: pointer; }
+.champ-hidden { margin: 4px 0 0; color: var(--muted); font-size: .9rem; }
+.champ-parts { display: grid; gap: 2px; max-width: 280px; margin: 6px 0 0; padding: 0 0 0 18px; list-style: none; color: var(--muted); font-size: .9rem; }
+.champ-parts li { display: flex; justify-content: space-between; gap: 12px; }
+.champ-parts-points { flex: none; font-variant-numeric: tabular-nums; }
 .champ-how { margin-top: 10px; color: var(--muted); font-size: .9rem; }
 .champ-how summary { color: var(--accent-dark); font-weight: 600; cursor: pointer; }
 .champ-how ul { margin: 6px 0; padding-left: 20px; }

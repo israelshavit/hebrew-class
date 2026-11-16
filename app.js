@@ -44,7 +44,8 @@
     suggestions: { items: null, loading: false, error: "", sending: false, sendError: "", saving: "" },
     report: { data: null, loading: false, error: "" },
     // The championship board on the Lessons page. off: the Google script is from before the board.
-    board: { data: null, loading: false, off: false, at: 0 },
+    // meOpen/howOpen: which parts of the board are opened, kept when the board refreshes
+    board: { data: null, loading: false, off: false, at: 0, again: false, meOpen: false, howOpen: false },
     loadErrors: [],
     teacher: {
       passcode: readSetting("hebrewClass.teacherPasscode", ""),
@@ -940,8 +941,23 @@
       else if (res && res.error === "bad-request") b.off = true;
     }, function () { /* no board this time */ }).then(function () {
       b.loading = false;
+      if (b.again) {
+        // Points changed while this was on its way: read them again.
+        b.again = false;
+        b.at = 0;
+        if (state.route.view === "home") { loadBoard(); return; }
+      }
       if (state.route.view === "home") render();
     });
+  }
+
+  // A quiz, Word of the day or live class just saved: the student's points
+  // changed, so the board is read again (straight away if it's on screen).
+  function boardChanged() {
+    var b = state.board;
+    b.at = 0;
+    if (b.loading) b.again = true;
+    else if (state.route.view === "home") loadBoard();
   }
 
   function pointsText(n) {
@@ -978,10 +994,11 @@
           el("span", { class: "champ-name", text: s.name + (mine ? " (you)" : "") }),
           el("span", { class: "champ-points", text: pointsText(s.points) })
         ]);
-      })) : el("p", { class: "champ-empty", text: "No points yet this week. Take a quiz or practise the Word of the day to lead the board!" }),
-      d.me && d.me.points ? el("p", { class: "champ-me", text: "You have " + pointsText(d.me.points) + " this week." })
-        : d.me && leaders.length ? el("p", { class: "champ-me", text: "You don't have any points yet this week." }) : null,
-      el("details", { class: "champ-how" }, [
+      })) : el("p", { class: "champ-empty", text: d.me && d.me.points
+        ? "Nobody is on the board yet this week." // the student has points but their name is hidden
+        : "No points yet this week. Take a quiz or practise the Word of the day to lead the board!" }),
+      renderMyPoints(d.me, leaders.length > 0),
+      el("details", { class: "champ-how", open: state.board.howOpen, ontoggle: function (e) { state.board.howOpen = e.target.open; } }, [
         el("summary", { text: "How to earn points" }),
         el("ul", null, [
           el("li", { text: "1 point for each correct quiz answer (your best try at each quiz counts)" }),
@@ -990,6 +1007,40 @@
         ]),
         el("p", { text: "Weeks run from Sunday to Saturday, and everyone starts the new week at zero." })
       ])
+    ]);
+  }
+
+  // The signed-in student's points this week. Opening the line shows where
+  // they came from (with a Google script from before the breakdown, just the total).
+  function renderMyPoints(me, anyLeaders) {
+    if (!me) return null;
+    if (!me.points) return anyLeaders ? el("p", { class: "champ-me", text: "You don't have any points yet this week." }) : null;
+    var total = "You have " + pointsText(me.points) + " this week.";
+    var hidden = me.hidden ? el("p", { class: "champ-hidden", text: "Your name is hidden from the board, so only you see your points." }) : null;
+    if (!me.parts) return el("div", null, [el("p", { class: "champ-me", text: total }), hidden]);
+    return el("div", null, [
+      el("details", { class: "champ-me-more", open: state.board.meOpen, ontoggle: function (e) { state.board.meOpen = e.target.open; } }, [
+        el("summary", { text: total }),
+        renderPointParts(me.parts)
+      ]),
+      hidden
+    ]);
+  }
+
+  function renderPointParts(parts) {
+    function count(n, one, many) {
+      return n ? " (" + n + " " + (n === 1 ? one : many) + ")" : "";
+    }
+    function row(label, points) {
+      return el("li", null, [
+        el("span", { text: label }),
+        el("span", { class: "champ-parts-points", text: pointsText(points) })
+      ]);
+    }
+    return el("ul", { class: "champ-parts", "aria-label": "Your points this week" }, [
+      row("Quizzes" + count(parts.quizzes, "quiz", "quizzes"), parts.quizPoints || 0),
+      row("Word of the day" + count(parts.days, "day", "days"), parts.practicePoints || 0),
+      row("Live class" + count(parts.classes, "class", "classes"), parts.classPoints || 0)
     ]);
   }
 
@@ -1785,6 +1836,7 @@
     };
     callBackend(payload).then(function (res) {
       quiz.sendStatus = res && res.ok ? "sent" : "failed";
+      if (res && res.ok) boardChanged();
     }, function () {
       quiz.sendStatus = "failed";
     }).then(function () {
@@ -2026,6 +2078,7 @@
       state.report.data = null;
       callBackend(asStudent({ action: "practice", day: w.day, word: w.row.en })).then(function (res) {
         w.saved = res && res.ok ? "saved" : res && res.error === "bad-request" ? "off" : res && res.error === "sign-in" ? "pin" : "failed";
+        if (res && res.ok) boardChanged();
       }, function () {
         w.saved = "failed";
       }).then(function () {
@@ -2803,6 +2856,7 @@
         live.email = email;
         writeSetting("hebrewClass.liveEmail", email);
         writeSetting("hebrewClass.liveSession", res.sessionId);
+        boardChanged();
       } else if (res && res.error === "not-live") {
         live.remote = { running: false };
         live.joinError = "The class isn't live right now.";

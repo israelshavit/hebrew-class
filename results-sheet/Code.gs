@@ -124,6 +124,7 @@ function liveJoin(data) {
   withLock(function () {
     attendanceSheet().appendRow([new Date(), safe(email, 120), live.lessonId, live.sessionId, safe(name, 60)]);
   });
+  boardPointsChanged();
   return reply(liveReply(live));
 }
 
@@ -518,6 +519,7 @@ function saveResult(data) {
       Math.max(0, Math.floor(Number(data.quiz) || 0)) || ""
     ]);
   });
+  boardPointsChanged();
   return reply({ ok: true });
 }
 
@@ -591,6 +593,7 @@ function savePractice(data) {
     var done = readPractice().some(function (p) { return p.day === day && nameKey(p.student) === key; });
     if (!done) practiceSheet().appendRow([new Date(), safe(name, 60), "'" + day, safe(data.word, 200)]);
   });
+  boardPointsChanged();
   return reply({ ok: true });
 }
 
@@ -655,7 +658,8 @@ function replySuggestion(data) {
    - 2 points per day the Word of the day was practised
    - 5 points per live class joined
    Everyone sees last week's champion and this week's top 3; a signed-in student
-   also sees their own points. Only names and points leave the script. The
+   also sees their own points and where they came from. Only names and points
+   leave the script (the breakdown goes only to that signed-in student). The
    teacher can hide a name (a test name, or a student who'd rather not appear):
    it stays off the board everyone sees. */
 
@@ -665,7 +669,8 @@ var BOARD_PLACES = 3;          // places shown; everyone tied for a place is sho
 var BOARD_MAX_NAMES = 5;       // ...up to this many names
 var BOARD_HIDDEN = "boardHidden";
 var BOARD_CACHE = "boardPoints";
-var BOARD_CACHE_SECONDS = 60;  // students load the board often; the sheets are read at most once a minute
+var BOARD_CACHE_SECONDS = 60;  // students load the board often; the sheets are read at most once a minute...
+var BOARD_VERSION = "boardVersion"; // ...unless someone's points changed since: then straight away
 
 function board(data) {
   var teacher = isTeacher(data);
@@ -697,7 +702,8 @@ function board(data) {
   var key = nameKey(data.name);
   if (key && studentAllowed(data.name, data.token)) {
     var mine = points.thisWeek.filter(function (s) { return s.key === key; })[0];
-    me = { points: mine ? mine.points : 0 };
+    // hidden: the student's name is off the board, so the page can say why they aren't on it.
+    me = { points: mine ? mine.points : 0, parts: mine ? mine.parts : null, hidden: !!hidden[key] };
   }
   return reply({ ok: true, weekStart: points.thisStart, champions: plain(champions), leaders: plain(leaders), me: me });
 }
@@ -739,13 +745,28 @@ function boardHidden() {
   }
 }
 
+// The saved board is used only if no quiz, practice or class join came in
+// since it was worked out (each one changes the version).
 function cachedBoardPoints() {
   var cache = CacheService.getScriptCache();
-  var saved = cache.get(BOARD_CACHE);
-  if (saved) return JSON.parse(saved);
+  var got = cache.getAll([BOARD_CACHE, BOARD_VERSION]);
+  var version = got[BOARD_VERSION] || "";
+  if (got[BOARD_CACHE]) {
+    var saved = JSON.parse(got[BOARD_CACHE]);
+    if (saved.version === version) return saved.points;
+  }
   var points = boardPoints();
-  try { cache.put(BOARD_CACHE, JSON.stringify(points), BOARD_CACHE_SECONDS); } catch (err) { /* too big to keep: read again next time */ }
+  try {
+    cache.put(BOARD_CACHE, JSON.stringify({ version: version, points: points }), BOARD_CACHE_SECONDS);
+  } catch (err) { /* too big to keep: read again next time */ }
   return points;
+}
+
+// Someone's points changed: the next board read works them out again.
+function boardPointsChanged() {
+  try {
+    CacheService.getScriptCache().put(BOARD_VERSION, Date.now() + "-" + Math.random(), 21600);
+  } catch (err) { /* the saved board runs out within a minute anyway */ }
 }
 
 // "2026-11-15" moved by n days.
@@ -756,7 +777,8 @@ function dayPlus(day, n) {
 }
 
 // Everyone's points this week and last week, most first:
-// { thisStart, lastStart, thisWeek: [{ key, name, points }], lastWeek: [...], names: { key: name } }
+// { thisStart, lastStart, thisWeek: [{ key, name, points, parts }], lastWeek: [...], names: { key: name } }
+// parts: { quizzes, quizPoints, days, practicePoints, classes, classPoints }
 function boardPoints(now) {
   now = now || new Date();
   var tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
@@ -813,9 +835,19 @@ function boardPoints(now) {
   function totals(w) {
     return Object.keys(w).map(function (key) {
       var e = w[key];
-      var quizPoints = Object.keys(e.quizzes).reduce(function (n, q) { return n + e.quizzes[q]; }, 0);
-      var points = quizPoints + POINTS_PER_PRACTICE * Object.keys(e.days).length + POINTS_PER_CLASS * Object.keys(e.classes).length;
-      return { key: key, name: e.name, points: points };
+      var quizzes = Object.keys(e.quizzes);
+      var days = Object.keys(e.days).length;
+      var classes = Object.keys(e.classes).length;
+      var parts = {
+        quizzes: quizzes.length,
+        quizPoints: quizzes.reduce(function (n, q) { return n + e.quizzes[q]; }, 0),
+        days: days,
+        practicePoints: POINTS_PER_PRACTICE * days,
+        classes: classes,
+        classPoints: POINTS_PER_CLASS * classes
+      };
+      var points = parts.quizPoints + parts.practicePoints + parts.classPoints;
+      return { key: key, name: e.name, points: points, parts: parts };
     }).filter(function (s) { return s.points > 0; }).sort(function (a, b) { return b.points - a.points || byName(a, b); });
   }
   return { thisStart: thisStart, lastStart: lastStart, thisWeek: totals(weeks.current), lastWeek: totals(weeks.last), names: names };
