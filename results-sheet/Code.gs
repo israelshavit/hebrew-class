@@ -656,7 +656,7 @@ function replySuggestion(data) {
    spreadsheet's time zone):
    - 1 point per correct quiz answer, counting the best try at each quiz that week
    - 2 points per day the Word of the day was practised
-   - 5 points per live class joined
+   - 10 points per live class joined
    Everyone sees last week's champion and this week's top 3; a signed-in student
    also sees their own points and where they came from. Only names and points
    leave the script (the breakdown goes only to that signed-in student). The
@@ -664,7 +664,7 @@ function replySuggestion(data) {
    it stays off the board everyone sees. */
 
 var POINTS_PER_PRACTICE = 2;
-var POINTS_PER_CLASS = 5;
+var POINTS_PER_CLASS = 10;
 var BOARD_PLACES = 3;          // places shown; everyone tied for a place is shown...
 var BOARD_MAX_NAMES = 5;       // ...up to this many names
 var BOARD_HIDDEN = "boardHidden";

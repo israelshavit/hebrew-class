@@ -1003,7 +1003,7 @@
         el("ul", null, [
           el("li", { text: "1 point for each correct quiz answer (your best try at each quiz counts)" }),
           el("li", { text: "2 points for each Word of the day you practise" }),
-          el("li", { text: "5 points for joining the live class" })
+          el("li", { text: "10 points for joining the live class" })
         ]),
         el("p", { text: "Weeks run from Sunday to Saturday, and everyone starts the new week at zero." })
       ])
@@ -3091,7 +3091,7 @@
   function renderBoardCard(t) {
     var head = el("div", null, [
       el("h2", { text: "Championship board" }),
-      el("p", { class: "hint", text: "Last week's champion and this week's top 3 show at the top of the Lessons page. Points: 1 per correct quiz answer (best try at each quiz), 2 per Word of the day, 5 per live class. Hide a name to keep it off the board, such as a test name or a student who'd rather not appear." })
+      el("p", { class: "hint", text: "Last week's champion and this week's top 3 show at the top of the Lessons page. Points: 1 per correct quiz answer (best try at each quiz), 2 per Word of the day, 10 per live class. Hide a name to keep it off the board, such as a test name or a student who'd rather not appear." })
     ]);
     if (t.boardOff) {
       return el("div", { class: "card dash-card" }, [head,

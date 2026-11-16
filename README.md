@@ -61,7 +61,7 @@ The top of the Lessons page shows **last week's Hebrew champion** and **this wee
 
 - 1 point for each correct quiz answer, counting the best try at each quiz that week (retaking a quiz can raise it, not add to it)
 - 2 points for each day the Word of the day is practised
-- 5 points for each live class joined
+- 10 points for each live class joined
 
 Weeks run Sunday to Saturday in the Google Sheet's time zone (File → Settings), and everyone starts each week at zero. The Google script works the points out from the **Results**, **Practice** and **Attendance** tabs (at most once a minute, but straight away after a quiz, Word of the day or class join, so a student sees their new points as soon as they're back on the Lessons page) and sends only names and points, never emails or PINs.
 
