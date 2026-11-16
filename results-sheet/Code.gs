@@ -31,6 +31,8 @@ function doPost(e) {
   if (data.action === "pinCode") return sendPinCode(data);
   if (data.action === "pinCodeReset") return resetPinWithCode(data);
   if (data.action === "translate") return translate(data);
+  if (data.action === "board") return board(data);
+  if (data.action === "boardHide") return boardHide(data);
   if (data.action === "liveState") return reply(liveReply(liveState()));
   if (data.action === "liveJoin") return liveJoin(data);
   if (data.action === "liveStart" || data.action === "liveSet" || data.action === "liveEnd" || data.action === "liveAttendees") {
@@ -644,6 +646,179 @@ function replySuggestion(data) {
     }
   });
   return found ? listSuggestions() : reply({ ok: false, error: "not-found" });
+}
+
+/* ---------- Championship board ----------
+   Points reward effort, week by week from Sunday to Saturday (in the
+   spreadsheet's time zone):
+   - 1 point per correct quiz answer, counting the best try at each quiz that week
+   - 2 points per day the Word of the day was practised
+   - 5 points per live class joined
+   Everyone sees last week's champion and this week's top 3; a signed-in student
+   also sees their own points. Only names and points leave the script. The
+   teacher can hide a name (a test name, or a student who'd rather not appear):
+   it stays off the board everyone sees. */
+
+var POINTS_PER_PRACTICE = 2;
+var POINTS_PER_CLASS = 5;
+var BOARD_PLACES = 3;          // places shown; everyone tied for a place is shown...
+var BOARD_MAX_NAMES = 5;       // ...up to this many names
+var BOARD_HIDDEN = "boardHidden";
+var BOARD_CACHE = "boardPoints";
+var BOARD_CACHE_SECONDS = 60;  // students load the board often; the sheets are read at most once a minute
+
+function board(data) {
+  var teacher = isTeacher(data);
+  if (data.passcode && !teacher) return reply({ ok: false, error: "wrong-passcode" });
+  var points = teacher ? boardPoints() : cachedBoardPoints();
+  var hidden = boardHidden();
+
+  if (teacher) {
+    // Everyone the sheets know, with both weeks' points, to hide or show names.
+    var list = {};
+    var add = function (key, name) {
+      if (key && !list[key]) list[key] = { name: name, points: 0, lastWeek: 0, hidden: !!hidden[key] };
+    };
+    Object.keys(points.names).forEach(function (key) { add(key, points.names[key]); });
+    points.thisWeek.forEach(function (s) { add(s.key, s.name); list[s.key].points = s.points; });
+    points.lastWeek.forEach(function (s) { add(s.key, s.name); list[s.key].lastWeek = s.points; });
+    var students = Object.keys(list).map(function (key) { return list[key]; }).sort(function (a, b) {
+      return b.points - a.points || b.lastWeek - a.lastWeek || byName(a, b);
+    });
+    return reply({ ok: true, weekStart: points.thisStart, students: students });
+  }
+
+  function shown(list) { return list.filter(function (s) { return !hidden[s.key]; }); }
+  function plain(list) { return list.map(function (s) { return { name: s.name, points: s.points, place: s.place }; }); }
+  var last = placed(shown(points.lastWeek));
+  var champions = last.filter(function (s) { return s.place === 1; }).slice(0, BOARD_MAX_NAMES);
+  var leaders = placed(shown(points.thisWeek)).filter(function (s) { return s.place <= BOARD_PLACES; }).slice(0, BOARD_MAX_NAMES);
+  var me = null;
+  var key = nameKey(data.name);
+  if (key && studentAllowed(data.name, data.token)) {
+    var mine = points.thisWeek.filter(function (s) { return s.key === key; })[0];
+    me = { points: mine ? mine.points : 0 };
+  }
+  return reply({ ok: true, weekStart: points.thisStart, champions: plain(champions), leaders: plain(leaders), me: me });
+}
+
+// Most points first; equal points share a place (1, 2, 2, 4).
+function placed(list) {
+  return list.map(function (s, i) {
+    var place = i + 1;
+    while (place > 1 && list[place - 2].points === s.points) place -= 1;
+    return { key: s.key, name: s.name, points: s.points, place: place };
+  });
+}
+
+function byName(a, b) {
+  var x = a.name.toLowerCase(), y = b.name.toLowerCase();
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+// The teacher hides a name from the board everyone sees, or shows it again.
+function boardHide(data) {
+  if (!isTeacher(data)) return reply({ ok: false, error: "wrong-passcode" });
+  var key = nameKey(data.name);
+  if (!key) return reply({ ok: false, error: "bad-request" });
+  withLock(function () {
+    var hidden = boardHidden();
+    if (data.hidden) hidden[key] = true;
+    else delete hidden[key];
+    PropertiesService.getScriptProperties().setProperty(BOARD_HIDDEN, JSON.stringify(hidden));
+  });
+  return board({ passcode: data.passcode });
+}
+
+// { key: true } for each hidden name.
+function boardHidden() {
+  try {
+    return JSON.parse(PropertiesService.getScriptProperties().getProperty(BOARD_HIDDEN) || "{}");
+  } catch (err) {
+    return {};
+  }
+}
+
+function cachedBoardPoints() {
+  var cache = CacheService.getScriptCache();
+  var saved = cache.get(BOARD_CACHE);
+  if (saved) return JSON.parse(saved);
+  var points = boardPoints();
+  try { cache.put(BOARD_CACHE, JSON.stringify(points), BOARD_CACHE_SECONDS); } catch (err) { /* too big to keep: read again next time */ }
+  return points;
+}
+
+// "2026-11-15" moved by n days.
+function dayPlus(day, n) {
+  var d = new Date(day + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+// Everyone's points this week and last week, most first:
+// { thisStart, lastStart, thisWeek: [{ key, name, points }], lastWeek: [...], names: { key: name } }
+function boardPoints(now) {
+  now = now || new Date();
+  var tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  var today = Utilities.formatDate(now, tz, "yyyy-MM-dd");
+  var thisStart = dayPlus(today, -new Date(today + "T00:00:00Z").getUTCDay()); // the Sunday
+  var lastStart = dayPlus(thisStart, -7);
+  var oldest = now.getTime() - 16 * 86400000; // anything older is before last week
+
+  function localDay(value) {
+    if (value instanceof Date) return value.getTime() < oldest ? "" : Utilities.formatDate(value, tz, "yyyy-MM-dd");
+    return String(value || "").replace(/^'/, "");
+  }
+  function weekOf(day) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    return day >= thisStart ? "current" : day >= lastStart ? "last" : null;
+  }
+
+  // The name as the student first signed in, so "dana" and "Dana" are one person.
+  var names = {};
+  dataRows(studentsSheet()).forEach(function (r) {
+    var name = cleanName(unsafe(r[1]).replace(/^'/, ""));
+    if (name) names[nameKey(name)] = name;
+  });
+
+  var weeks = { current: {}, last: {} };
+  function entry(day, rawName) {
+    var week = weekOf(day);
+    var name = cleanName(unsafe(rawName).replace(/^'/, ""));
+    if (!week || !name) return null;
+    var key = nameKey(name);
+    var w = weeks[week];
+    return w[key] || (w[key] = { key: key, name: names[key] || name, quizzes: {}, days: {}, classes: {} });
+  }
+
+  // Quiz results: the best score at each quiz.
+  dataRows(sheet()).forEach(function (r) {
+    var e = entry(localDay(r[0]), r[1]);
+    if (!e) return;
+    var quiz = String(r[2]) + "|" + (Number(r[8]) || 0);
+    e.quizzes[quiz] = Math.max(e.quizzes[quiz] || 0, Number(r[4]) || 0);
+  });
+  // Word of the day: each day once (counted in the week of the word's day).
+  dataRows(practiceSheet()).forEach(function (r) {
+    var day = localDay(r[2]);
+    var e = entry(day, r[1]);
+    if (e) e.days[day] = true;
+  });
+  // Live classes: each class once.
+  dataRows(attendanceSheet()).forEach(function (r) {
+    var e = entry(localDay(r[0]), r[4]);
+    if (e && r[3]) e.classes[String(r[3])] = true;
+  });
+
+  function totals(w) {
+    return Object.keys(w).map(function (key) {
+      var e = w[key];
+      var quizPoints = Object.keys(e.quizzes).reduce(function (n, q) { return n + e.quizzes[q]; }, 0);
+      var points = quizPoints + POINTS_PER_PRACTICE * Object.keys(e.days).length + POINTS_PER_CLASS * Object.keys(e.classes).length;
+      return { key: key, name: e.name, points: points };
+    }).filter(function (s) { return s.points > 0; }).sort(function (a, b) { return b.points - a.points || byName(a, b); });
+  }
+  return { thisStart: thisStart, lastStart: lastStart, thisWeek: totals(weeks.current), lastWeek: totals(weeks.last), names: names };
 }
 
 /* ---------- How to say ----------

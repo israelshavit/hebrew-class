@@ -10,6 +10,7 @@ Across the whole site (menu at the top of every page):
 
 - **Sign-in**: students sign in with their name; an email and a PIN are optional. The email is saved on the **Students** tab of your sheet. The teacher signs in with the teacher passcode.
 - **Self study** also has the *Word of the day* (one word a day about family or something positive, the same for everyone, with a one-question check; the words are in `words/daily-words.js`, and a word already used in a lesson is skipped) and *How to say* (type or say a short English phrase and get Google's Hebrew translation with audio).
+- **Championship board** (top of the Lessons page): last week's champion and this week's top 3, with points for effort (see below).
 - **Suggestions** (in the Self study menu): students suggest improvements or lesson topics; everyone sees the list and the teacher's responses.
 - **My progress**: each student's quiz scores and Word of the day practice, lesson by lesson and week by week, with the phrases they miss most. The teacher sees everyone's on the Teacher page, with the class's totals for the week and its most missed phrases.
 - **Download PDF** on a report opens the browser's print window; choose "Save as PDF" there. The teacher can save the class report or one student's.
@@ -53,6 +54,20 @@ If you change `Code.gs` later (including the passcode), paste the new file into 
 - Every PIN chosen, reset or changed, every code emailed and every pause after wrong PINs is listed under **PIN changes** on the Teacher page (and under **PIN history** in each student's report), and kept on the **PIN changes** tab of the sheet. The PINs themselves are never listed.
 - Only the teacher passcode opens everyone's reports. This is light protection suited to a class, not for sensitive data.
 - How to say sends the typed phrase to Google to be translated. The translation has no vowel marks and can be wrong.
+
+## Championship board
+
+The top of the Lessons page shows **last week's Hebrew champion** and **this week's top 3** (everyone tied for a place is shown, up to 5 names). A signed-in student also sees their own points for the week. Points reward effort, so a student who practises often can beat a stronger one who rarely logs in:
+
+- 1 point for each correct quiz answer, counting the best try at each quiz that week (retaking a quiz can raise it, not add to it)
+- 2 points for each day the Word of the day is practised
+- 5 points for each live class joined
+
+Weeks run Sunday to Saturday in the Google Sheet's time zone (File → Settings), and everyone starts each week at zero. The Google script works the points out from the **Results**, **Practice** and **Attendance** tabs (at most once a minute) and sends only names and points, never emails or PINs.
+
+On the Teacher page, **Championship board** lists every student's points this week and last week. **Hide** keeps a name off the board everyone sees, for test names or a student who'd rather not appear; **Show** puts it back. The hidden names are kept in the script's properties, not in the sheet.
+
+The board needs the version of `Code.gs` that has it: paste it into Apps Script and deploy a new version (see above). Until then the Lessons page simply has no board, and the Teacher page says how to switch it on.
 
 ## Running a live class
 

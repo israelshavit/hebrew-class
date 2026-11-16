@@ -43,6 +43,8 @@
     say: { text: "", busy: false, error: "", result: null, listening: false },
     suggestions: { items: null, loading: false, error: "", sending: false, sendError: "", saving: "" },
     report: { data: null, loading: false, error: "" },
+    // The championship board on the Lessons page. off: the Google script is from before the board.
+    board: { data: null, loading: false, off: false, at: 0 },
     loadErrors: [],
     teacher: {
       passcode: readSetting("hebrewClass.teacherPasscode", ""),
@@ -54,7 +56,12 @@
       updatedAt: null,
       selected: null,
       week: 0,        // 0 is this week, -1 last week…
-      report: null    // the student whose full report is open
+      report: null,   // the student whose full report is open
+      board: null,    // everyone's points, to hide or show names on the championship board
+      boardLoading: false,
+      boardOff: false,
+      boardBusy: "",  // the name being hidden or shown
+      boardError: ""
     }
   };
 
@@ -411,6 +418,7 @@
     var view = state.route.view;
     if (view === "teacher") { loadResults(); loadSuggestions(); }
     if (!signedIn()) return;
+    if (view === "home") loadBoard();
     if (view === "suggestions") loadSuggestions();
     if (view === "progress") {
       if (isTeacher()) loadResults(); else loadReport();
@@ -465,6 +473,12 @@
     writeSetting("hebrewClass.student", JSON.stringify(state.student));
     state.report.data = null;
     state.wotd = null;
+    resetBoard(); // "Your points" belong to whoever is signed in
+  }
+
+  function resetBoard() {
+    state.board.data = null;
+    state.board.at = 0;
   }
 
   function signOut() {
@@ -481,8 +495,11 @@
     state.report = { data: null, loading: false, error: "" };
     state.quiz = null;
     state.wotd = null;
+    resetBoard();
     var t = state.teacher;
     t.passcode = "";
+    t.board = null;
+    t.boardError = "";
     t.results = null;
     t.updatedAt = null;
     t.selected = null;
@@ -877,6 +894,7 @@
 
   function renderHome() {
     var wrap = el("section", null, [
+      renderBoard(),
       el("h1", { text: "Weekly lessons" }),
       el("p", { class: "lede", text: "Open a lesson to see and print its one-page sheet." })
     ]);
@@ -899,6 +917,80 @@
     });
     wrap.appendChild(list);
     return wrap;
+  }
+
+  /* ---------- Championship board ----------
+     Last week's champion and this week's top 3, from the Google script, which
+     counts points for effort (the rules are in "How to earn points" below).
+     It stays hidden until the script answers, and with a script from before
+     the board. */
+
+  var BOARD_REFRESH_MS = 60000;
+  var MEDALS = ["🥇", "🥈", "🥉"];
+
+  function loadBoard() {
+    var b = state.board;
+    if (!config.resultsUrl || b.loading || b.off) return;
+    if (b.at && Date.now() - b.at < BOARD_REFRESH_MS) return;
+    b.loading = true;
+    var body = { action: "board" };
+    if (state.student) asStudent(body); // to show the student their own points
+    callBackend(body).then(function (res) {
+      if (res && res.ok && res.leaders) { b.data = res; b.at = Date.now(); }
+      else if (res && res.error === "bad-request") b.off = true;
+    }, function () { /* no board this time */ }).then(function () {
+      b.loading = false;
+      if (state.route.view === "home") render();
+    });
+  }
+
+  function pointsText(n) {
+    return n + (n === 1 ? " point" : " points");
+  }
+
+  // "Dana", "Dana and Moshe", "Dana, Moshe and Rina"
+  function namesText(list) {
+    var names = list.map(function (s) { return s.name; });
+    return names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names[names.length - 1] : names[0];
+  }
+
+  function renderBoard() {
+    var d = state.board.data;
+    if (!d) return null;
+    var champions = d.champions || [];
+    var leaders = d.leaders || [];
+    var myKey = state.student ? studentKey(state.student.name) : "";
+    return el("section", { class: "card champ-board no-print", "aria-labelledby": "champ-title" }, [
+      el("h2", { id: "champ-title", class: "visually-hidden", text: "Championship board" }),
+      champions.length ? el("p", { class: "champ-last" }, [
+        el("span", { class: "champ-cup", "aria-hidden": "true", text: "🏆" }),
+        el("span", null, [
+          champions.length > 1 ? "Last week's Hebrew champions: " : "Last week's Hebrew champion: ",
+          el("strong", { text: namesText(champions) }),
+          el("span", { class: "champ-last-points", text: " · " + pointsText(champions[0].points) })
+        ])
+      ]) : null,
+      el("h3", { class: "champ-title", text: "This week so far" }),
+      leaders.length ? el("ul", { class: "champ-list" }, leaders.map(function (s) {
+        var mine = myKey && studentKey(s.name) === myKey;
+        return el("li", { class: mine ? "mine" : null }, [
+          el("span", { class: "champ-place", text: MEDALS[s.place - 1] || String(s.place) }),
+          el("span", { class: "champ-name", text: s.name + (mine ? " (you)" : "") }),
+          el("span", { class: "champ-points", text: pointsText(s.points) })
+        ]);
+      })) : el("p", { class: "champ-empty", text: "No points yet this week. Take a quiz or practise the Word of the day to lead the board!" }),
+      d.me && d.me.points ? el("p", { class: "champ-me", text: "You have " + pointsText(d.me.points) + " this week." })
+        : d.me && leaders.length ? el("p", { class: "champ-me", text: "You don't have any points yet this week." }) : null,
+      el("details", { class: "champ-how" }, [
+        el("summary", { text: "How to earn points" }),
+        el("ul", null, [
+          el("li", { text: "1 point for each correct quiz answer (your best try at each quiz counts)" }),
+          el("li", { text: "2 points for each Word of the day you practise" }),
+          el("li", { text: "5 points for joining the live class" })
+        ]),
+        el("p", { text: "Weeks run from Sunday to Saturday, and everyone starts the new week at zero." })
+      ])
+    ]);
   }
 
   /* ---------- Sharing the site ---------- */
@@ -2882,6 +2974,7 @@
     if (!config.resultsUrl || !t.passcode || t.loading) return;
     var rejected = false;
     t.loading = true;
+    loadTeacherBoard();
     callBackend({ action: "list", passcode: t.passcode }).then(function (res) {
       if (res && res.ok) {
         t.results = res.results || [];
@@ -2906,6 +2999,82 @@
       // A rejected passcode signs the teacher out, whatever page they are on.
       if (rejected || onTeacherPage()) render();
     });
+  }
+
+  // Everyone's points this week and last, for the championship board card.
+  // A wrong passcode is dealt with by loadResults, which runs alongside.
+  function loadTeacherBoard() {
+    var t = state.teacher;
+    if (!config.resultsUrl || !t.passcode || t.boardLoading || t.boardOff) return;
+    t.boardLoading = true;
+    callBackend({ action: "board", passcode: t.passcode }).then(function (res) {
+      if (res && res.ok && res.students) t.board = res;
+      else if (res && res.error === "bad-request") t.boardOff = true; // a Google script from before the board
+    }, function () { /* tried again with the next refresh */ }).then(function () {
+      t.boardLoading = false;
+      if (onTeacherPage()) render();
+    });
+  }
+
+  function setBoardHidden(student, hidden) {
+    var t = state.teacher;
+    if (t.boardBusy) return;
+    t.boardBusy = student.name;
+    t.boardError = "";
+    render();
+    callBackend({ action: "boardHide", passcode: t.passcode, name: student.name, hidden: hidden }).then(function (res) {
+      if (res && res.ok && res.students) t.board = res;
+      else t.boardError = "Couldn't change that. Try again.";
+    }, function () {
+      t.boardError = "Couldn't reach the class service. Try again.";
+    }).then(function () {
+      t.boardBusy = "";
+      resetBoard(); // the Lessons page on this device shows the change straight away
+      render();
+    });
+  }
+
+  function renderBoardCard(t) {
+    var head = el("div", null, [
+      el("h2", { text: "Championship board" }),
+      el("p", { class: "hint", text: "Last week's champion and this week's top 3 show at the top of the Lessons page. Points: 1 per correct quiz answer (best try at each quiz), 2 per Word of the day, 5 per live class. Hide a name to keep it off the board, such as a test name or a student who'd rather not appear." })
+    ]);
+    if (t.boardOff) {
+      return el("div", { class: "card dash-card" }, [head,
+        el("p", { class: "notice", text: "To switch the board on, paste the new results-sheet/Code.gs into your Google script and deploy a new version (Deploy → Manage deployments → Edit → Version: New version)." })]);
+    }
+    if (!t.board) {
+      return el("div", { class: "card dash-card" }, [head, el("p", { class: "notice", text: "Loading the board…" })]);
+    }
+    var rows = t.board.students.map(function (s) {
+      var busy = t.boardBusy === s.name;
+      return el("tr", { class: s.hidden ? "board-hidden" : null }, [
+        el("th", { scope: "row" }, [s.name, s.hidden ? el("span", { class: "board-tag", text: "Hidden" }) : null]),
+        el("td", { class: s.points ? null : "empty", text: s.points ? String(s.points) : "–" }),
+        el("td", { class: s.lastWeek ? null : "empty", text: s.lastWeek ? String(s.lastWeek) : "–" }),
+        el("td", null, [el("button", {
+          class: "btn board-toggle",
+          type: "button",
+          disabled: !!t.boardBusy,
+          "aria-label": (s.hidden ? "Show " : "Hide ") + s.name + " on the board",
+          text: busy ? "Saving…" : s.hidden ? "Show" : "Hide",
+          onclick: function () { setBoardHidden(s, !s.hidden); }
+        })])
+      ]);
+    });
+    return el("div", { class: "card dash-card" }, [
+      head,
+      t.boardError ? el("p", { class: "notice error", role: "alert", text: t.boardError }) : null,
+      rows.length ? el("div", { class: "grid-scroll" }, [el("table", { class: "score-grid board-grid" }, [
+        el("thead", null, [el("tr", null, [
+          el("th", { scope: "col", text: "Student" }),
+          el("th", { scope: "col", text: "This week" }),
+          el("th", { scope: "col", text: "Last week" }),
+          el("th", { scope: "col" }, [el("span", { class: "visually-hidden", text: "On the board" })])
+        ])]),
+        el("tbody", null, rows)
+      ])]) : el("p", { class: "notice", text: "No students yet." })
+    ]);
   }
 
   // The dashboard is at #/teacher, and at #/progress for a signed-in teacher.
@@ -2976,6 +3145,7 @@
     }
     wrap.appendChild(renderWeekCard(t));
     if (t.report) wrap.appendChild(renderStudentReport(t));
+    wrap.appendChild(renderBoardCard(t));
     if (t.results.length) {
       wrap.appendChild(renderScoreGrid(t));
       if (t.selected) wrap.appendChild(renderAttempts(t));

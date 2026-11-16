@@ -161,6 +161,33 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .lesson-title { font-size: 1.15rem; font-weight: 700; }
 .lesson-meta { color: var(--muted); font-size: .9rem; }
 .notice { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--accent-soft); }
+
+/* Championship board, at the top of the Lessons page */
+.card.champ-board { margin-bottom: 20px; padding: 16px 18px; }
+.champ-last {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 1.05rem;
+}
+.champ-cup { flex: none; font-size: 1.7rem; line-height: 1; }
+.champ-last-points { color: var(--muted); font-size: .9rem; white-space: nowrap; }
+.champ-title { margin: 0 0 8px; color: var(--accent-dark); font-size: .8rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.champ-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.champ-list li { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--bg); }
+.champ-list li.mine { background: var(--accent-soft); }
+.champ-place { flex: none; width: 1.7em; text-align: center; font-size: 1.2rem; font-weight: 700; color: var(--muted); }
+.champ-name { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.champ-points { flex: none; color: var(--muted); font-size: .9rem; font-variant-numeric: tabular-nums; }
+.champ-empty { margin: 0; color: var(--muted); }
+.champ-me { margin: 10px 0 0; color: var(--accent-dark); font-weight: 600; }
+.champ-how { margin-top: 10px; color: var(--muted); font-size: .9rem; }
+.champ-how summary { color: var(--accent-dark); font-weight: 600; cursor: pointer; }
+.champ-how ul { margin: 6px 0; padding-left: 20px; }
+.champ-how p { margin: 0; }
 .notice.error { background: var(--bad-soft); color: var(--bad); }
 
 /* Read by screen readers, not shown */
@@ -703,6 +730,21 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .score-grid tbody th { font-weight: 600; }
 .col-title { display: block; font-size: .85rem; }
 .score-grid td.empty { color: var(--muted); }
+/* Teacher page: championship board names */
+.board-grid thead th, .board-grid th:first-child { min-width: 0; }
+.board-grid td:last-child { text-align: right; }
+.board-toggle { min-height: 36px; padding: 0 12px; }
+.board-hidden th, .board-hidden td:not(:last-child) { color: var(--muted); }
+.board-tag {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: .75rem;
+  font-weight: 600;
+}
 .cell {
   display: grid;
   width: 100%;
