@@ -480,6 +480,7 @@
   function resetBoard() {
     state.board.data = null;
     state.board.at = 0;
+    removeSetting(BOARD_SAVED);
   }
 
   function signOut() {
@@ -923,21 +924,48 @@
   /* ---------- Championship board ----------
      Last week's champion and this week's top 3, from the Google script, which
      counts points for effort (the rules are in "How to earn points" below).
-     It stays hidden until the script answers, and with a script from before
-     the board. */
+     The script takes a second or two to answer, so the browser keeps the last
+     board it saw and shows that straight away while it asks again. With no
+     saved board the card stays hidden until the script answers, and with a
+     script from before the board. */
 
   var BOARD_REFRESH_MS = 60000;
+  var BOARD_SAVED = "hebrewClass.board";
   var MEDALS = ["🥇", "🥈", "🥉"];
+
+  // Who the board was read for: "Your points" belong to that student only.
+  function boardOwner() {
+    return state.student ? "student:" + studentKey(state.student.name) : "teacher";
+  }
+
+  // The board this browser saw last, if it was read for whoever is signed in now
+  // and is from this week (the week starts on Sunday).
+  function savedBoard() {
+    try {
+      var saved = JSON.parse(readSetting(BOARD_SAVED, "") || "null");
+      var sunday = dayKey(addDays(new Date(), -new Date().getDay()));
+      if (saved && saved.owner === boardOwner() && saved.data && saved.data.weekStart === sunday) return saved.data;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
 
   function loadBoard() {
     var b = state.board;
-    if (!config.resultsUrl || b.loading || b.off) return;
+    if (!config.resultsUrl || b.off) return;
+    if (!b.data) b.data = savedBoard();
+    if (b.loading) return;
     if (b.at && Date.now() - b.at < BOARD_REFRESH_MS) return;
     b.loading = true;
+    var owner = boardOwner();
     var body = { action: "board" };
     if (state.student) asStudent(body); // to show the student their own points
     callBackend(body).then(function (res) {
-      if (res && res.ok && res.leaders) { b.data = res; b.at = Date.now(); }
+      if (owner !== boardOwner() || !signedIn()) return; // signed out or someone else signed in meanwhile
+      if (res && res.ok && res.leaders) {
+        b.data = res;
+        b.at = Date.now();
+        writeSetting(BOARD_SAVED, JSON.stringify({ owner: owner, data: res }));
+      }
       else if (res && res.error === "bad-request") b.off = true;
     }, function () { /* no board this time */ }).then(function () {
       b.loading = false;
