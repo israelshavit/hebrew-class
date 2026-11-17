@@ -40,6 +40,8 @@
     quizDone: {},     // best score per "lessonId|quiz number" since the page was opened
     cards: null,
     wotd: null,
+    wotdDay: null,      // the Word of the day chosen: today's, or one from the past week
+    wotdPractised: {},  // words practised since the page opened, by "day|student"
     say: { text: "", busy: false, error: "", result: null, listening: false },
     suggestions: { items: null, loading: false, error: "", sending: false, sendError: "", saving: "" },
     report: { data: null, loading: false, error: "" },
@@ -434,8 +436,9 @@
     if (view === "progress") {
       if (isTeacher()) loadResults(); else loadReport();
     }
-    // The list of quizzes shows the student's best score on each.
-    if (onQuizTab() && !state.report.data) loadReport();
+    // The list of quizzes shows the student's best score on each, and the
+    // Word of the day which of the past week's words they've practised.
+    if ((onQuizTab() || onWordTab()) && !state.report.data) loadReport();
   }
 
   /* ---------- Rendering ---------- */
@@ -1076,7 +1079,7 @@
         el("summary", { text: "How to earn points" }),
         el("ul", null, [
           el("li", { text: "1 point for each correct quiz answer (your best try at each quiz counts)" }),
-          el("li", { text: "2 points for each Word of the day you practise" }),
+          el("li", { text: "2 points for each Word of the day you practise, today's or one from the past week" }),
           el("li", { text: "10 points for joining the live class" })
         ]),
         el("p", { text: "Weeks run from Sunday to Saturday, and everyone starts the new week at zero." })
@@ -1113,7 +1116,7 @@
     }
     return el("ul", { class: "champ-parts", "aria-label": "Your points this week" }, [
       row("Quizzes" + count(parts.quizzes, "quiz", "quizzes"), parts.quizPoints || 0),
-      row("Word of the day" + count(parts.days, "day", "days"), parts.practicePoints || 0),
+      row("Word of the day" + count(parts.days, "word", "words"), parts.practicePoints || 0),
       row("Live class" + count(parts.classes, "class", "classes"), parts.classPoints || 0)
     ]);
   }
@@ -2070,8 +2073,30 @@
     ]);
   }
 
+  // Besides today's word, a student can catch up on the words of this many days before.
+  var WORD_DAYS_BACK = 7;
+
+  // Today first, then the days before it.
+  function wordDays(today) {
+    var date = parseDay(today);
+    var days = [];
+    for (var i = 0; i <= WORD_DAYS_BACK; i++) days.push(dayKey(addDays(date, -i)));
+    return days;
+  }
+
+  // Whether the word of that day has been practised: saved in the student's
+  // report, done since the page opened, or (today's) on this browser.
+  function practisedWord(day) {
+    if (state.wotdPractised[practisedKey(day)]) return true;
+    if (day === dayKey(new Date()) && readSetting("hebrewClass.wotdDone", "") === practisedKey(day)) return true;
+    var data = state.student && state.report.data;
+    return !!(data && data.practice.some(function (p) { return p.day === day; }));
+  }
+
   function renderWordOfDay() {
-    var day = dayKey(new Date());
+    var today = dayKey(new Date());
+    var days = wordDays(today);
+    var day = days.indexOf(state.wotdDay) >= 0 ? state.wotdDay : today; // back to today once a chosen day is too old
     if (!state.wotd || state.wotd.day !== day) {
       var entry = wordOfDay(day);
       state.wotd = entry && {
@@ -2081,17 +2106,49 @@
         step: "learn",
         options: null,
         picked: null,
-        done: readSetting("hebrewClass.wotdDone", "") === practisedKey(day),
         saved: ""
       };
     }
     var w = state.wotd;
     if (!w) return el("p", { class: "notice", text: "There is no word of the day yet." });
     var toolbar = el("div", { class: "toolbar study-toolbar no-print" }, [niqqudToggle()]);
-    return el("div", { class: "cards-view" }, [toolbar, w.step === "ask" ? renderWordCheck(w) : renderWordLearn(w)]);
+    return el("div", { class: "cards-view" }, w.step === "ask" ? [toolbar, renderWordCheck(w)] : [
+      toolbar,
+      renderWordLearn(w, day === today),
+      renderWordDays(days, day)
+    ]);
   }
 
-  function renderWordLearn(w) {
+  // Today's word and the past week's: a student who missed a day can catch up.
+  function renderWordDays(days, chosen) {
+    return el("div", { class: "wotd-days no-print" }, [
+      el("p", { class: "wotd-days-title", id: "wotd-days-title", text: "Catch up on the past week's words" }),
+      el("div", { class: "wotd-day-list", role: "group", "aria-labelledby": "wotd-days-title" }, days.map(function (day, i) {
+        var done = practisedWord(day);
+        var date = parseDay(day);
+        var label = i === 0 ? "Today" : i === 1 ? "Yesterday"
+          : date.toLocaleDateString(undefined, { weekday: "short" }) + " " + date.getDate(); // "Sun 15"
+        return el("button", {
+          type: "button",
+          class: "subtab wotd-day" + (day === chosen ? " active" : ""),
+          "aria-pressed": day === chosen ? "true" : "false",
+          onclick: function () {
+            if (day === chosen) return;
+            state.wotdDay = day;
+            stopSpeaking();
+            render();
+          }
+        }, [
+          label,
+          done ? el("span", { class: "wotd-day-done", "aria-hidden": "true", text: "✓" }) : null,
+          done ? el("span", { class: "visually-hidden", text: ", practised" }) : null
+        ]);
+      }))
+    ]);
+  }
+
+  function renderWordLearn(w, isToday) {
+    var done = practisedWord(w.day);
     var savedText = {
       saving: "Saving…",
       saved: "Saved in your progress report.",
@@ -2104,14 +2161,14 @@
         el("p", { class: "card-section", text: "Word of the day · " + formatDate(w.day) }),
         cardBody(w.row)
       ]),
-      w.done ? el("p", { class: "notice good", role: "status", text: "Practised today. Come back tomorrow for a new word." }) : null,
+      done ? el("p", { class: "notice good", role: "status", text: isToday ? "Practised today. Come back tomorrow for a new word." : "You've practised this word." }) : null,
       savedText ? el("p", { class: "send-status" + (w.saved === "saving" || w.saved === "saved" ? "" : " bad"), text: savedText }) : null,
       !state.student ? el("p", { class: "hint", text: "You're signed in as the teacher, so your practice isn't recorded." }) : null,
       el("div", { class: "actions wotd-actions" }, [
         el("button", {
-          class: "btn" + (w.done ? "" : " primary"),
+          class: "btn" + (done ? "" : " primary"),
           type: "button",
-          text: w.done ? "Practise again" : "Practise this word",
+          text: done ? "Practise again" : "Practise this word",
           onclick: function () {
             w.step = "ask";
             w.picked = null;
@@ -2157,14 +2214,20 @@
     w.picked = opt;
     if (opt !== w.form) { render(); return; }
     w.step = "learn";
-    w.done = true;
-    writeSetting("hebrewClass.wotdDone", practisedKey(w.day));
+    state.wotdPractised[practisedKey(w.day)] = true;
+    if (w.day === dayKey(new Date())) writeSetting("hebrewClass.wotdDone", practisedKey(w.day));
     if (state.student && config.resultsUrl) {
       w.saved = "saving";
-      state.report.data = null;
       callBackend(asStudent({ action: "practice", day: w.day, word: w.row.en })).then(function (res) {
         w.saved = res && res.ok ? "saved" : res && res.error === "bad-request" ? "off" : res && res.error === "sign-in" ? "pin" : "failed";
-        if (res && res.ok) boardChanged();
+        if (res && res.ok) {
+          // Kept in the report already loaded, which also marks the day's button.
+          var data = state.report.data;
+          if (data && !data.practice.some(function (p) { return p.day === w.day; })) {
+            data.practice.push({ at: new Date().toISOString(), student: state.student.name, day: w.day, word: w.row.en });
+          }
+          boardChanged();
+        }
       }, function () {
         w.saved = "failed";
       }).then(function () {
@@ -2467,8 +2530,9 @@
       var d = new Date(r.finishedAt);
       if (!isNaN(d)) week(weekStart(d)).quizzes.push(r);
     });
+    // The day it was practised, which for a word caught up on is after the word's own day.
     practice.forEach(function (p) {
-      var d = parseDay(p.day);
+      var d = practisedOn(p);
       if (d) week(weekStart(d)).days[d.getDay()] = p.word || "practised";
     });
     var current = weekStart(new Date());
@@ -2490,6 +2554,14 @@
 
   function countDays(days) {
     return Object.keys(days).length;
+  }
+
+  // When a Word of the day was practised (a word from an earlier day can be
+  // caught up on), as a local date; older rows without the time use the word's day.
+  function practisedOn(p) {
+    var d = new Date(p.at);
+    if (isNaN(d)) return parseDay(p.day);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
   }
 
   // Sunday to Saturday, filled where the word of the day was practised.
@@ -2700,12 +2772,16 @@
       report.error = "Couldn't reach the class service. Check your connection.";
     }).then(function () {
       report.loading = false;
-      if (state.route.view === "progress" || (onQuizTab() && !state.quiz)) render();
+      if (state.route.view === "progress" || (onQuizTab() && !state.quiz) || (onWordTab() && !(state.wotd && state.wotd.step === "ask"))) render();
     });
   }
 
   function onQuizTab() {
     return state.route.view === "lesson" && state.route.tab === "quiz";
+  }
+
+  function onWordTab() {
+    return state.route.view === "study" && state.route.tab === "word";
   }
 
   function renderMyProgress() {
@@ -3372,12 +3448,14 @@
         var d = new Date(r.finishedAt);
         return !isNaN(d) && dayKey(weekStart(d)) === startKey;
       });
+      // Counted in the week they were practised, like the championship points.
       var days = {};
+      var words = 0;
       data.practice.forEach(function (p) {
-        var d = parseDay(p.day);
-        if (d && p.day >= startKey && p.day <= endKey) days[d.getDay()] = true;
+        var d = practisedOn(p);
+        if (d && dayKey(weekStart(d)) === startKey) { days[d.getDay()] = true; words += 1; }
       });
-      return { student: s, quizzes: quizzes, days: days, avg: averagePercent(quizzes) };
+      return { student: s, quizzes: quizzes, days: days, words: words, avg: averagePercent(quizzes) };
     });
   }
 
@@ -3389,7 +3467,7 @@
     rows.forEach(function (r) {
       if (r.quizzes.length || countDays(r.days)) active += 1;
       quizzes += r.quizzes.length;
-      words += countDays(r.days);
+      words += r.words;
       if (r.avg !== null) { sum += r.avg; marked += 1; }
     });
     var body = el("tbody", null, rows.map(function (r) {

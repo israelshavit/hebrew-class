@@ -849,11 +849,11 @@ function boardPoints(now) {
     var quiz = String(r[2]) + "|" + (Number(r[8]) || 0);
     e.quizzes[quiz] = Math.max(e.quizzes[quiz] || 0, Number(r[4]) || 0);
   });
-  // Word of the day: each day once (counted in the week of the word's day).
+  // Word of the day: each word once, in the week it was practised (a student
+  // can catch up on the past week's words, like retaking an older quiz).
   dataRows(practiceSheet()).forEach(function (r) {
-    var day = localDay(r[2]);
-    var e = entry(day, r[1]);
-    if (e) e.days[day] = true;
+    var e = entry(localDay(r[0]), r[1]);
+    if (e) e.days[dayText(r[2])] = true;
   });
   // Live classes: each class once.
   dataRows(attendanceSheet()).forEach(function (r) {
