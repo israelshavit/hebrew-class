@@ -368,6 +368,10 @@
   var LESSON_TABS = ["cards", "quiz", "resources", "live"];
   // The ones that sit in the Self study menu.
   var STUDY_TABS = ["cards", "quiz", "resources"];
+  // The Self study lesson list that is open ("quiz" or "cards"), so it stays
+  // open when the page is drawn again, and whether to put the keyboard on it then.
+  var openLessonMenu = null;
+  var focusLessonMenu = false;
 
   function lessonUrl(lesson, tab) {
     return "#/lesson/" + encodeURIComponent(lesson.id) + (LESSON_TABS.indexOf(tab) >= 0 ? "/" + tab : "");
@@ -403,6 +407,7 @@
 
   function onRouteChange() {
     state.route = parseHash();
+    if (state.route.tab !== openLessonMenu) openLessonMenu = null; // only the Quiz or Word by word button keeps its list open on its own page
     rememberLesson();
     if (state.quiz && state.quiz.lessonId !== state.route.lessonId) state.quiz = null;
     if (state.cards && state.cards.lessonId !== state.route.lessonId) state.cards = null;
@@ -411,6 +416,11 @@
     loadForRoute();
     render();
     window.scrollTo(0, 0);
+    if (focusLessonMenu) {
+      focusLessonMenu = false;
+      var menu = document.querySelector(".lesson-menu:not([hidden])");
+      if (menu) (menu.querySelector("a.current") || menu.querySelector("a")).focus();
+    }
     startLivePolling();
   }
 
@@ -1182,12 +1192,13 @@
     ]);
   }
 
-  // The Quiz and Word by word buttons open the list of lessons. Choosing one
-  // opens that lesson there, and the other Self study pages follow it.
-  // Returns { button, menu }.
+  // The Quiz and Word by word buttons open their page for the current lesson,
+  // with the list of lessons on top. Choosing one opens that lesson there, and
+  // the other Self study pages follow it. Returns { button, menu }.
   function lessonPicker(tab, text, active, current) {
     var id = "lesson-menu-" + tab;
-    var menu = el("div", { class: "lesson-menu", id: id, hidden: true }, [
+    var open = openLessonMenu === tab;
+    var menu = el("div", { class: "lesson-menu", id: id, hidden: !open }, [
       el("p", { class: "lesson-menu-title", text: "Choose a lesson" }),
       el("ul", null, lessons.map(function (lesson, i) {
         var here = lesson === current;
@@ -1210,13 +1221,23 @@
     var button = el("button", {
       type: "button",
       class: "subtab subtab-picker" + (active === tab ? " active" : ""),
-      "aria-expanded": "false",
+      "aria-expanded": open ? "true" : "false",
       "aria-controls": id,
       onclick: function (e) {
+        // From another page, go to this one first: the button turns blue and
+        // the quiz or the cards show behind the list.
+        if (active !== tab) {
+          closeLessonMenus();
+          openLessonMenu = tab;
+          focusLessonMenu = e.detail === 0;
+          location.hash = lessonUrl(current, tab);
+          return;
+        }
         var opening = menu.hidden;
         closeLessonMenus();
         if (!opening) return;
         menu.hidden = false;
+        openLessonMenu = tab;
         button.setAttribute("aria-expanded", "true");
         // Opened from the keyboard: go straight to the list, which comes after the other buttons.
         if (e.detail === 0) (menu.querySelector("a.current") || menu.querySelector("a")).focus();
@@ -1228,6 +1249,7 @@
   // Closes an open lesson list; returns its button, or null if none was open.
   function closeLessonMenus() {
     var opener = null;
+    openLessonMenu = null;
     document.querySelectorAll(".lesson-menu:not([hidden])").forEach(function (menu) {
       menu.hidden = true;
       opener = document.querySelector('[aria-controls="' + menu.id + '"]');
