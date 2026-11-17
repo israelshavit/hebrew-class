@@ -522,6 +522,22 @@
     else render();
   }
 
+  // This device's time zone, so the teacher can see which country each student
+  // is in (the Google script works the country out). Sent after signing in, and
+  // again when the time zone changes. An older script answers "bad-request",
+  // so it tries again on the next visit.
+  function sendPlace() {
+    if (!state.student || !config.resultsUrl) return;
+    var timeZone = "";
+    try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { /* very old browser */ }
+    if (!timeZone) return;
+    var sent = studentKey(state.student.name) + "|" + timeZone;
+    if (readSetting("hebrewClass.placeSent", "") === sent) return;
+    callBackend(asStudent({ action: "place", timeZone: timeZone })).then(function (res) {
+      if (res && res.ok && res.saved) writeSetting("hebrewClass.placeSent", sent);
+    }, function () { /* offline: next time */ });
+  }
+
   var SIGN_IN_ERRORS = {
     "bad-name": "Please enter your name.",
     "bad-pin": "A PIN is 4 to 8 digits (a temporary PIN from the email is 3).",
@@ -543,6 +559,7 @@
           writeSetting("hebrewClass.liveEmail", email);
         }
         loadForRoute();
+        sendPlace();
       }
       render();
     }
@@ -836,7 +853,8 @@
           ])
         ]),
         auth.error ? el("p", { class: "notice error", role: "alert", text: auth.error }) : null,
-        el("div", { class: "actions" }, [el("button", { class: "btn primary", type: "submit", disabled: auth.busy, text: auth.busy ? "Signing in…" : "Sign in" })])
+        el("div", { class: "actions" }, [el("button", { class: "btn primary", type: "submit", disabled: auth.busy, text: auth.busy ? "Signing in…" : "Sign in" })]),
+        config.resultsUrl ? el("p", { class: "field-hint signin-note", text: "Your teacher also sees which country you're in, from your device's time zone." }) : null
       ]),
       config.resultsUrl ? el("details", { class: "teacher-signin", open: !!t.error }, [
         el("summary", { text: "Teacher? Sign in here" }),
@@ -3276,9 +3294,34 @@
       if (missedCard) wrap.appendChild(missedCard);
       wrap.appendChild(renderRecent(t));
     }
+    var countriesCard = renderCountriesCard(t);
+    if (countriesCard) wrap.appendChild(countriesCard);
     var pinCard = renderPinChanges(t);
     if (pinCard) wrap.appendChild(pinCard);
     return wrap;
+  }
+
+  // How many students are in each country, most first. Hidden until the
+  // Google script saves countries.
+  function renderCountriesCard(t) {
+    var counts = {};
+    var unknown = 0;
+    t.students.forEach(function (s) {
+      if (s.country) counts[s.country] = (counts[s.country] || 0) + 1;
+      else unknown += 1;
+    });
+    var countries = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a] || a.localeCompare(b); });
+    if (!countries.length) return null;
+    return el("div", { class: "card dash-card" }, [
+      el("h2", { text: "Where students are" }),
+      el("p", { class: "hint", text: "From each student's device time zone, saved when they sign in or next open the site." + (unknown ? " Not known yet: " + unknown + (unknown === 1 ? " student." : " students.") : "") }),
+      el("ul", { class: "country-list" }, countries.map(function (country) {
+        return el("li", null, [
+          el("span", { text: country }),
+          el("span", { class: "country-count", text: String(counts[country]) })
+        ]);
+      }))
+    ]);
   }
 
   function renderSuggestionsCard() {
@@ -3439,7 +3482,11 @@
           el("button", { class: "btn", type: "button", text: "Close", onclick: function () { t.report = null; t.pinReset = null; render(); } })
         ])
       ]),
-      email ? el("p", { class: "hint" }, [el("a", { href: "mailto:" + email, text: email })]) : null,
+      email || (onFile && onFile.timeZone) ? el("p", { class: "hint" }, [
+        onFile && onFile.timeZone ? el("span", { title: "Time zone " + onFile.timeZone, text: onFile.country || onFile.timeZone }) : null,
+        email && onFile && onFile.timeZone ? " · " : null,
+        email ? el("a", { href: "mailto:" + email, text: email }) : null
+      ]) : null,
       pin && pin.message ? el("p", { class: "notice" + (pin.error ? " error" : ""), role: "status", text: pin.message }) : null,
       // Until the student uses it. The PIN itself is only in their email (and the sheet).
       onFile && onFile.tempPinSent && !(pin && pin.message && !pin.error) ? el("p", { class: "notice", role: "status", text: "A temporary PIN was emailed to " + onFile.name + " and hasn't been used yet. It works until they sign in with it and choose their own PIN." }) : null,
@@ -3628,13 +3675,74 @@
     ]);
   }
 
+  /* ---------- New versions ---------- */
+
+  // A page left open (a phone keeps its tabs for days) checks version.js each
+  // time it comes back on screen, and reloads itself when there is a new one.
+  var checkingVersion = false;
+
+  function checkForNewVersion() {
+    if (checkingVersion || !window.fetch || !/^https?:$/.test(location.protocol)) return; // not from file://
+    checkingVersion = true;
+    fetch("version.js?t=" + Date.now(), { cache: "no-store" })
+      .then(function (response) { return response.ok ? response.text() : ""; })
+      .then(function (text) {
+        var match = /\.version\s*=\s*"([^"]+)"/.exec(text);
+        var latest = match && match[1];
+        if (!latest || latest === HC.version || busyOnPage()) return;
+        // Once per version, so a server still handing out the old files can't keep reloading the page.
+        if (readSession("hebrewClass.reloadedFor") === latest) return;
+        writeSession("hebrewClass.reloadedFor", latest);
+        return refreshFiles().then(function () { location.reload(); });
+      })
+      .catch(function () { /* offline: it tries again next time */ })
+      .then(function () { checkingVersion = false; });
+  }
+
+  // In the middle of a quiz, or with something typed and not sent, it waits
+  // for the next time instead of losing it.
+  function busyOnPage() {
+    if (state.quiz && !state.quiz.done) return true;
+    return Array.prototype.some.call(document.querySelectorAll("#app input, #app textarea"), function (field) {
+      return field.type !== "checkbox" && field.type !== "radio" && field.value !== field.defaultValue;
+    });
+  }
+
+  // Downloads the page's files again first, or the reload could take the old
+  // ones from the browser's cache (GitHub Pages lets it keep them 10 minutes).
+  function refreshFiles() {
+    var urls = [location.href.split("#")[0]];
+    document.querySelectorAll("script[src], link[rel=stylesheet][href]").forEach(function (node) {
+      var url = node.src || node.href;
+      if (url.indexOf(location.origin + "/") === 0) urls.push(url);
+    });
+    return Promise.all(urls.map(function (url) {
+      return fetch(url, { cache: "reload" }).then(function (response) { return response.text(); }).catch(function () {});
+    }));
+  }
+
+  function readSession(key) {
+    try { return sessionStorage.getItem(key); } catch (e) { return null; }
+  }
+
+  function writeSession(key, value) {
+    try { sessionStorage.setItem(key, value); } catch (e) { /* ignore */ }
+  }
+
   /* ---------- Start ---------- */
 
   setInterval(function () {
     if (onTeacherPage() && !document.hidden) loadResults();
   }, REFRESH_MS);
   document.addEventListener("visibilitychange", function () {
-    if (onTeacherPage() && !document.hidden) loadResults();
+    if (document.hidden) return;
+    checkForNewVersion();
+    sendPlace(); // only when the time zone has changed
+    if (onTeacherPage()) loadResults();
+  });
+  // Back on the page from the browser's back and forward cache.
+  window.addEventListener("pageshow", function (e) {
+    if (e.persisted) checkForNewVersion();
   });
 
   window.addEventListener("hashchange", onRouteChange);
@@ -3665,6 +3773,7 @@
       loadForRoute();
       render();
       startLivePolling();
+      sendPlace();
       if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitSheet);
     });
   });

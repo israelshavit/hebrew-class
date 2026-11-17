@@ -785,6 +785,11 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .recent .muted { grid-column: 1; font-size: .9rem; }
 .recent .score-pill { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
 .pin-changes li { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; }
+.country-list { list-style: none; margin: 0; padding: 0; max-width: 360px; }
+.country-list li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.country-list li:last-child { border-bottom: 0; }
+.country-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.signin-note { margin: 12px 0 0; }
 .pin-changes .muted { margin-left: auto; }
 .pin-history { margin: 4px 0 12px; }
 .pin-history summary { cursor: pointer; font-weight: 600; }

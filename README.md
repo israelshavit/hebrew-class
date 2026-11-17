@@ -25,7 +25,7 @@ There is no build step. Open `index.html` in a browser to try it locally.
    `["English (m/f)", ["translit m", "translit f"], ["Hebrew m", "Hebrew f"]]`; write `(to m/f)` when the forms depend on who you're talking to.
    A section can have an `explanation` (shown above its phrases on the sheet, and under the buttons in Word by word). Set `video` (and `videoTitle`) to link the lesson's video: it appears at the end of the sheet and under Self study → Resources.
 3. Add the file name (without `.js`) to `lessons/index.js`. Lessons are numbered by date: the oldest is shown as "Lesson 1".
-4. Commit and push. GitHub Pages updates the site in a minute or two.
+4. Change the version in `version.js` (the date and time will do), then commit and push. GitHub Pages updates the site in a minute or two, and a page already open on a phone or computer reloads itself to get it the next time it comes back on screen (except in the middle of a quiz or with something typed and not sent; then it waits for the next time).
 
 ## Getting quiz results
 
@@ -54,6 +54,7 @@ If you change `Code.gs` later (including the passcode), paste the new file into 
 - Every PIN chosen, reset or changed, every code emailed and every pause after wrong PINs is listed under **PIN changes** on the Teacher page (and under **PIN history** in each student's report), and kept on the **PIN changes** tab of the sheet. The PINs themselves are never listed.
 - Only the teacher passcode opens everyone's reports. This is light protection suited to a class, not for sensitive data.
 - How to say sends the typed phrase to Google to be translated. The translation has no vowel marks and can be wrong.
+- The site also sends the time zone of the student's device (its clock setting, like `Asia/Jerusalem`, not its exact location). The script saves it with the country it belongs to in the **Country** and **Time zone** columns of the **Students** tab. It's sent after signing in, or on the next visit for a student already signed in, and again if the time zone changes (a phone usually switches time zone when travelling). The sign-in page tells students their teacher sees their country. The Teacher page shows how many students are in each country (**Where students are**) and the country in each student's report. It needs the latest `Code.gs`; until then nothing is sent or shown.
 
 ## Championship board
 

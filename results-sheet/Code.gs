@@ -20,6 +20,7 @@ function doPost(e) {
   }
   if (data.action === "list") return listResults(data);
   if (data.action === "signIn") return signIn(data);
+  if (data.action === "place") return savePlace(data);
   if (data.action === "myReport") return myReport(data);
   if (data.action === "practice") return savePractice(data);
   if (data.action === "suggestions") return listSuggestions();
@@ -171,8 +172,8 @@ function withLock(fn) {
    teacher presses Clear PIN. Every change is written to the "PIN changes" sheet. */
 
 var STUDENTS_SHEET = "Students";
-// Email is last so sheets made before it was added keep their columns.
-var STUDENTS_HEADERS = ["Joined", "Name", "Key", "PIN", "Email"];
+// Newer columns go last so sheets made before them keep their columns.
+var STUDENTS_HEADERS = ["Joined", "Name", "Key", "PIN", "Email", "Country", "Time zone"];
 var PIN_TRIES = 5; // wrong PINs allowed before a pause
 var PIN_PAUSE_SECONDS = 600;
 var TEMP_PIN_PREFIX = "Temporary: ";
@@ -209,7 +210,7 @@ function nameKey(value) {
 function studentsSheet() {
   var s = namedSheet(STUDENTS_SHEET, STUDENTS_HEADERS);
   if (s.getLastColumn() < STUDENTS_HEADERS.length) {
-    s.getRange(1, 1, 1, STUDENTS_HEADERS.length).setValues([STUDENTS_HEADERS]); // older sheet: add the Email header
+    s.getRange(1, 1, 1, STUDENTS_HEADERS.length).setValues([STUDENTS_HEADERS]); // older sheet: add the newer headers
   }
   return s;
 }
@@ -321,6 +322,33 @@ function signIn(data) {
     if (out.ok && student && email) studentsSheet().getRange(student.row, 5).setValue(safe(email, 120));
   });
   return reply(out);
+}
+
+// The time zone the student's browser reports, and the country it is in. The
+// site sends it after signing in, and again whenever the time zone changes.
+// It's the device's clock setting, not its exact location.
+function savePlace(data) {
+  var key = nameKey(data.name);
+  var timeZone = String(data.timeZone || "").trim();
+  if (!key || !/^[A-Za-z0-9_+\-\/]{1,60}$/.test(timeZone)) return reply({ ok: false, error: "bad-request" });
+  if (!studentAllowed(data.name, data.token)) return reply({ ok: false, error: "sign-in" });
+  var saved = false;
+  withLock(function () {
+    var student = findStudent(key);
+    if (!student) return;
+    studentsSheet().getRange(student.row, 6, 1, 2).setValues([[safe(countryOf(timeZone), 60), safe(timeZone, 60)]]);
+    saved = true;
+  });
+  return reply({ ok: true, saved: saved });
+}
+
+// The country of a time zone, or "" for one that isn't a country's (like UTC).
+function countryOf(timeZone) {
+  for (var i = 0; i < COUNTRY_ZONES.length; i++) {
+    var parts = COUNTRY_ZONES[i].split("|");
+    if ((" " + parts[1] + " ").indexOf(" " + timeZone + " ") >= 0) return parts[0];
+  }
+  return "";
 }
 
 // The teacher clears a forgotten PIN for a student with no email (and ends any
@@ -528,7 +556,8 @@ function saveResult(data) {
 function listResults(data) {
   if (!isTeacher(data)) return reply({ ok: false, error: "wrong-passcode" });
   var students = dataRows(studentsSheet()).map(function (r) {
-    return { name: unsafe(r[1]), joinedAt: isoDate(r[0]), hasPin: !!r[3], tempPinSent: !!tempPinOf(r[3]), email: unsafe(r[4]) };
+    return { name: unsafe(r[1]), joinedAt: isoDate(r[0]), hasPin: !!r[3], tempPinSent: !!tempPinOf(r[3]), email: unsafe(r[4]),
+      country: unsafe(r[5]), timeZone: unsafe(r[6]) };
   });
   var pinChanges = dataRows(namedSheet(PIN_LOG_SHEET, PIN_LOG_HEADERS)).map(function (r) {
     return { at: isoDate(r[0]), student: unsafe(r[1]), change: unsafe(r[2]) };
@@ -908,3 +937,258 @@ function safe(value, maxLength) {
 function unsafe(value) {
   return String(value || "");
 }
+
+/* ---------- Countries ----------
+   Each line is a country, then the time zones in it, from the IANA time zone
+   database (2026f), with the older names some browsers still report
+   (Asia/Calcutta, US/Eastern, Israel...). Used by savePlace. */
+
+var COUNTRY_ZONES = [
+  "Afghanistan|Asia/Kabul",
+  "Åland Islands|Europe/Mariehamn",
+  "Albania|Europe/Tirane",
+  "Algeria|Africa/Algiers",
+  "American Samoa|Pacific/Pago_Pago Pacific/Samoa US/Samoa",
+  "Andorra|Europe/Andorra",
+  "Angola|Africa/Luanda",
+  "Anguilla|America/Anguilla",
+  "Antarctica|Antarctica/Casey Antarctica/Davis Antarctica/DumontDUrville Antarctica/Mawson Antarctica/McMurdo Antarctica/Palmer Antarctica/Rothera Antarctica/Syowa Antarctica/Troll Antarctica/Vostok",
+  "Antigua & Barbuda|America/Antigua",
+  "Argentina|America/Argentina/Buenos_Aires America/Argentina/Catamarca America/Argentina/ComodRivadavia America/Argentina/Cordoba America/Argentina/Jujuy America/Argentina/La_Rioja America/Argentina/Mendoza America/Argentina/Rio_Gallegos America/Argentina/Salta America/Argentina/San_Juan America/Argentina/San_Luis America/Argentina/Tucuman America/Argentina/Ushuaia America/Buenos_Aires America/Catamarca America/Cordoba America/Jujuy America/Mendoza America/Rosario",
+  "Armenia|Asia/Yerevan",
+  "Aruba|America/Aruba",
+  "Australia|Antarctica/Macquarie Australia/ACT Australia/Adelaide Australia/Brisbane Australia/Broken_Hill Australia/Canberra Australia/Currie Australia/Darwin Australia/Eucla Australia/Hobart Australia/LHI Australia/Lindeman Australia/Lord_Howe Australia/Melbourne Australia/NSW Australia/North Australia/Perth Australia/Queensland Australia/South Australia/Sydney Australia/Tasmania Australia/Victoria Australia/West Australia/Yancowinna",
+  "Austria|Europe/Vienna",
+  "Azerbaijan|Asia/Baku",
+  "Bahamas|America/Nassau",
+  "Bahrain|Asia/Bahrain",
+  "Bangladesh|Asia/Dacca Asia/Dhaka",
+  "Barbados|America/Barbados",
+  "Belarus|Europe/Minsk",
+  "Belgium|CET Europe/Brussels MET",
+  "Belize|America/Belize",
+  "Benin|Africa/Porto-Novo",
+  "Bermuda|Atlantic/Bermuda",
+  "Bhutan|Asia/Thimbu Asia/Thimphu",
+  "Bolivia|America/La_Paz",
+  "Bosnia & Herzegovina|Europe/Sarajevo",
+  "Botswana|Africa/Gaborone",
+  "Brazil|America/Araguaina America/Bahia America/Belem America/Boa_Vista America/Campo_Grande America/Cuiaba America/Eirunepe America/Fortaleza America/Maceio America/Manaus America/Noronha America/Porto_Acre America/Porto_Velho America/Recife America/Rio_Branco America/Santarem America/Sao_Paulo Brazil/Acre Brazil/DeNoronha Brazil/East Brazil/West",
+  "British Indian Ocean Territory|Indian/Chagos",
+  "British Virgin Islands|America/Tortola",
+  "Brunei|Asia/Brunei",
+  "Bulgaria|Europe/Sofia",
+  "Burkina Faso|Africa/Ouagadougou",
+  "Burundi|Africa/Bujumbura",
+  "Cambodia|Asia/Phnom_Penh",
+  "Cameroon|Africa/Douala",
+  "Canada|America/Atikokan America/Blanc-Sablon America/Cambridge_Bay America/Creston America/Dawson America/Dawson_Creek America/Edmonton America/Fort_Nelson America/Glace_Bay America/Goose_Bay America/Halifax America/Inuvik America/Iqaluit America/Moncton America/Montreal America/Nipigon America/Pangnirtung America/Rainy_River America/Rankin_Inlet America/Regina America/Resolute America/St_Johns America/Swift_Current America/Thunder_Bay America/Toronto America/Vancouver America/Whitehorse America/Winnipeg America/Yellowknife Canada/Atlantic Canada/Central Canada/Eastern Canada/Mountain Canada/Newfoundland Canada/Pacific Canada/Saskatchewan Canada/Yukon",
+  "Cape Verde|Atlantic/Cape_Verde",
+  "Caribbean Netherlands|America/Kralendijk",
+  "Cayman Islands|America/Cayman",
+  "Central African Republic|Africa/Bangui",
+  "Chad|Africa/Ndjamena",
+  "Chile|America/Coyhaique America/Punta_Arenas America/Santiago Chile/Continental Chile/EasterIsland Pacific/Easter",
+  "China|Asia/Chongqing Asia/Chungking Asia/Harbin Asia/Kashgar Asia/Shanghai Asia/Urumqi PRC",
+  "Christmas Island|Indian/Christmas",
+  "Cocos (Keeling) Islands|Indian/Cocos",
+  "Colombia|America/Bogota",
+  "Comoros|Indian/Comoro",
+  "Congo - Brazzaville|Africa/Brazzaville",
+  "Congo - Kinshasa|Africa/Kinshasa Africa/Lubumbashi",
+  "Cook Islands|Pacific/Rarotonga",
+  "Costa Rica|America/Costa_Rica",
+  "Côte d’Ivoire|Africa/Abidjan Africa/Timbuktu Iceland",
+  "Croatia|Europe/Zagreb",
+  "Cuba|America/Havana Cuba",
+  "Curaçao|America/Curacao",
+  "Cyprus|Asia/Famagusta Asia/Nicosia Europe/Nicosia",
+  "Czechia|Europe/Prague",
+  "Denmark|Europe/Copenhagen",
+  "Djibouti|Africa/Djibouti",
+  "Dominica|America/Dominica",
+  "Dominican Republic|America/Santo_Domingo",
+  "Ecuador|America/Guayaquil Pacific/Galapagos",
+  "Egypt|Africa/Cairo Egypt",
+  "El Salvador|America/El_Salvador",
+  "Equatorial Guinea|Africa/Malabo",
+  "Eritrea|Africa/Asmara",
+  "Estonia|Europe/Tallinn",
+  "Eswatini|Africa/Mbabane",
+  "Ethiopia|Africa/Addis_Ababa",
+  "Falkland Islands|Atlantic/Stanley",
+  "Faroe Islands|Atlantic/Faeroe Atlantic/Faroe",
+  "Fiji|Pacific/Fiji",
+  "Finland|Europe/Helsinki",
+  "France|Europe/Paris",
+  "French Guiana|America/Cayenne",
+  "French Polynesia|Pacific/Gambier Pacific/Marquesas Pacific/Tahiti",
+  "French Southern Territories|Indian/Kerguelen",
+  "Gabon|Africa/Libreville",
+  "Gambia|Africa/Banjul",
+  "Georgia|Asia/Tbilisi",
+  "Germany|Atlantic/Jan_Mayen Europe/Berlin Europe/Busingen",
+  "Ghana|Africa/Accra",
+  "Gibraltar|Europe/Gibraltar",
+  "Greece|EET Europe/Athens",
+  "Greenland|America/Danmarkshavn America/Godthab America/Nuuk America/Scoresbysund America/Thule",
+  "Grenada|America/Grenada",
+  "Guadeloupe|America/Guadeloupe",
+  "Guam|Pacific/Guam",
+  "Guatemala|America/Guatemala",
+  "Guernsey|Europe/Guernsey",
+  "Guinea|Africa/Conakry",
+  "Guinea-Bissau|Africa/Bissau",
+  "Guyana|America/Guyana",
+  "Haiti|America/Port-au-Prince",
+  "Honduras|America/Tegucigalpa",
+  "Hong Kong SAR China|Asia/Hong_Kong Hongkong",
+  "Hungary|Europe/Budapest",
+  "Iceland|Atlantic/Reykjavik",
+  "India|Asia/Calcutta Asia/Kolkata",
+  "Indonesia|Asia/Jakarta Asia/Jayapura Asia/Makassar Asia/Pontianak Asia/Ujung_Pandang",
+  "Iran|Asia/Tehran Iran",
+  "Iraq|Asia/Baghdad",
+  "Ireland|Eire Europe/Dublin",
+  "Isle of Man|Europe/Isle_of_Man",
+  "Israel|Asia/Jerusalem Asia/Tel_Aviv Israel",
+  "Italy|Europe/Rome",
+  "Jamaica|America/Jamaica Jamaica",
+  "Japan|Asia/Tokyo Japan",
+  "Jersey|Europe/Jersey",
+  "Jordan|Asia/Amman",
+  "Kazakhstan|Asia/Almaty Asia/Aqtau Asia/Aqtobe Asia/Atyrau Asia/Oral Asia/Qostanay Asia/Qyzylorda",
+  "Kenya|Africa/Asmera Africa/Nairobi",
+  "Kiribati|Pacific/Enderbury Pacific/Kanton Pacific/Kiritimati Pacific/Tarawa",
+  "Kuwait|Asia/Kuwait",
+  "Kyrgyzstan|Asia/Bishkek",
+  "Laos|Asia/Vientiane",
+  "Latvia|Europe/Riga",
+  "Lebanon|Asia/Beirut",
+  "Lesotho|Africa/Maseru",
+  "Liberia|Africa/Monrovia",
+  "Libya|Africa/Tripoli Libya",
+  "Liechtenstein|Europe/Vaduz",
+  "Lithuania|Europe/Vilnius",
+  "Luxembourg|Europe/Luxembourg",
+  "Macao SAR China|Asia/Macao Asia/Macau",
+  "Madagascar|Indian/Antananarivo",
+  "Malawi|Africa/Blantyre",
+  "Malaysia|Asia/Kuala_Lumpur Asia/Kuching",
+  "Maldives|Indian/Maldives",
+  "Mali|Africa/Bamako",
+  "Malta|Europe/Malta",
+  "Marshall Islands|Kwajalein Pacific/Kwajalein Pacific/Majuro",
+  "Martinique|America/Martinique",
+  "Mauritania|Africa/Nouakchott",
+  "Mauritius|Indian/Mauritius",
+  "Mayotte|Indian/Mayotte",
+  "Mexico|America/Bahia_Banderas America/Cancun America/Chihuahua America/Ciudad_Juarez America/Ensenada America/Hermosillo America/Matamoros America/Mazatlan America/Merida America/Mexico_City America/Monterrey America/Ojinaga America/Santa_Isabel America/Tijuana Mexico/BajaNorte Mexico/BajaSur Mexico/General",
+  "Micronesia|Pacific/Chuuk Pacific/Kosrae Pacific/Pohnpei",
+  "Moldova|Europe/Chisinau Europe/Tiraspol",
+  "Monaco|Europe/Monaco",
+  "Mongolia|Asia/Choibalsan Asia/Hovd Asia/Ulaanbaatar Asia/Ulan_Bator",
+  "Montenegro|Europe/Podgorica",
+  "Montserrat|America/Montserrat",
+  "Morocco|Africa/Casablanca",
+  "Mozambique|Africa/Maputo",
+  "Myanmar (Burma)|Asia/Rangoon Asia/Yangon",
+  "Namibia|Africa/Windhoek",
+  "Nauru|Pacific/Nauru",
+  "Nepal|Asia/Kathmandu Asia/Katmandu",
+  "Netherlands|Europe/Amsterdam",
+  "New Caledonia|Pacific/Noumea",
+  "New Zealand|Antarctica/South_Pole NZ NZ-CHAT Pacific/Auckland Pacific/Chatham",
+  "Nicaragua|America/Managua",
+  "Niger|Africa/Niamey",
+  "Nigeria|Africa/Lagos",
+  "Niue|Pacific/Niue",
+  "Norfolk Island|Pacific/Norfolk",
+  "North Korea|Asia/Pyongyang",
+  "North Macedonia|Europe/Skopje",
+  "Northern Mariana Islands|Pacific/Saipan",
+  "Norway|Europe/Oslo",
+  "Oman|Asia/Muscat",
+  "Pakistan|Asia/Karachi",
+  "Palau|Pacific/Palau",
+  "Palestinian Territories|Asia/Gaza Asia/Hebron",
+  "Panama|America/Coral_Harbour America/Panama EST",
+  "Papua New Guinea|Pacific/Bougainville Pacific/Port_Moresby Pacific/Truk Pacific/Yap",
+  "Paraguay|America/Asuncion",
+  "Peru|America/Lima",
+  "Philippines|Asia/Manila",
+  "Pitcairn Islands|Pacific/Pitcairn",
+  "Poland|Europe/Warsaw Poland",
+  "Portugal|Atlantic/Azores Atlantic/Madeira Europe/Lisbon Portugal WET",
+  "Puerto Rico|America/Puerto_Rico America/Virgin",
+  "Qatar|Asia/Qatar",
+  "Réunion|Indian/Reunion",
+  "Romania|Europe/Bucharest",
+  "Russia|Asia/Anadyr Asia/Barnaul Asia/Chita Asia/Irkutsk Asia/Kamchatka Asia/Khandyga Asia/Krasnoyarsk Asia/Magadan Asia/Novokuznetsk Asia/Novosibirsk Asia/Omsk Asia/Sakhalin Asia/Srednekolymsk Asia/Tomsk Asia/Ust-Nera Asia/Vladivostok Asia/Yakutsk Asia/Yekaterinburg Europe/Astrakhan Europe/Kaliningrad Europe/Kirov Europe/Moscow Europe/Samara Europe/Saratov Europe/Ulyanovsk Europe/Volgograd W-SU",
+  "Rwanda|Africa/Kigali",
+  "Samoa|Pacific/Apia",
+  "San Marino|Europe/San_Marino",
+  "São Tomé & Príncipe|Africa/Sao_Tome",
+  "Saudi Arabia|Asia/Riyadh",
+  "Senegal|Africa/Dakar",
+  "Serbia|Europe/Belgrade",
+  "Seychelles|Indian/Mahe",
+  "Sierra Leone|Africa/Freetown",
+  "Singapore|Asia/Singapore Singapore",
+  "Sint Maarten|America/Lower_Princes",
+  "Slovakia|Europe/Bratislava",
+  "Slovenia|Europe/Ljubljana",
+  "Solomon Islands|Pacific/Guadalcanal Pacific/Ponape",
+  "Somalia|Africa/Mogadishu",
+  "South Africa|Africa/Johannesburg",
+  "South Georgia & South Sandwich Islands|Atlantic/South_Georgia",
+  "South Korea|Asia/Seoul ROK",
+  "South Sudan|Africa/Juba",
+  "Spain|Africa/Ceuta Atlantic/Canary Europe/Madrid",
+  "Sri Lanka|Asia/Colombo",
+  "St. Barthélemy|America/St_Barthelemy",
+  "St. Helena|Atlantic/St_Helena",
+  "St. Kitts & Nevis|America/St_Kitts",
+  "St. Lucia|America/St_Lucia",
+  "St. Martin|America/Marigot",
+  "St. Pierre & Miquelon|America/Miquelon",
+  "St. Vincent & Grenadines|America/St_Vincent",
+  "Sudan|Africa/Khartoum",
+  "Suriname|America/Paramaribo",
+  "Svalbard & Jan Mayen|Arctic/Longyearbyen",
+  "Sweden|Europe/Stockholm",
+  "Switzerland|Europe/Zurich",
+  "Syria|Asia/Damascus",
+  "Taiwan|Asia/Taipei ROC",
+  "Tajikistan|Asia/Dushanbe",
+  "Tanzania|Africa/Dar_es_Salaam",
+  "Thailand|Asia/Bangkok",
+  "Timor-Leste|Asia/Dili",
+  "Togo|Africa/Lome",
+  "Tokelau|Pacific/Fakaofo",
+  "Tonga|Pacific/Tongatapu",
+  "Trinidad & Tobago|America/Port_of_Spain",
+  "Tunisia|Africa/Tunis",
+  "Türkiye|Asia/Istanbul Europe/Istanbul Turkey",
+  "Turkmenistan|Asia/Ashgabat Asia/Ashkhabad",
+  "Turks & Caicos Islands|America/Grand_Turk",
+  "Tuvalu|Pacific/Funafuti",
+  "U.S. Outlying Islands|Pacific/Midway Pacific/Wake",
+  "U.S. Virgin Islands|America/St_Thomas",
+  "Uganda|Africa/Kampala",
+  "Ukraine|Europe/Kiev Europe/Kyiv Europe/Simferopol Europe/Uzhgorod Europe/Zaporozhye",
+  "United Arab Emirates|Asia/Dubai",
+  "United Kingdom|Europe/Belfast Europe/London GB GB-Eire",
+  "United States|America/Adak America/Anchorage America/Atka America/Boise America/Chicago America/Denver America/Detroit America/Fort_Wayne America/Indiana/Indianapolis America/Indiana/Knox America/Indiana/Marengo America/Indiana/Petersburg America/Indiana/Tell_City America/Indiana/Vevay America/Indiana/Vincennes America/Indiana/Winamac America/Indianapolis America/Juneau America/Kentucky/Louisville America/Kentucky/Monticello America/Knox_IN America/Los_Angeles America/Louisville America/Menominee America/Metlakatla America/New_York America/Nome America/North_Dakota/Beulah America/North_Dakota/Center America/North_Dakota/New_Salem America/Phoenix America/Shiprock America/Sitka America/Yakutat HST MST Navajo Pacific/Honolulu Pacific/Johnston US/Alaska US/Aleutian US/Arizona US/Central US/East-Indiana US/Eastern US/Hawaii US/Indiana-Starke US/Michigan US/Mountain US/Pacific",
+  "Uruguay|America/Montevideo",
+  "Uzbekistan|Asia/Samarkand Asia/Tashkent",
+  "Vanuatu|Pacific/Efate",
+  "Vatican City|Europe/Vatican",
+  "Venezuela|America/Caracas",
+  "Vietnam|Asia/Ho_Chi_Minh Asia/Saigon",
+  "Wallis & Futuna|Pacific/Wallis",
+  "Western Sahara|Africa/El_Aaiun",
+  "Yemen|Asia/Aden",
+  "Zambia|Africa/Lusaka",
+  "Zimbabwe|Africa/Harare"
+];
