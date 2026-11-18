@@ -479,7 +479,8 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .linklike { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-dark); text-decoration: underline; cursor: pointer; }
 
 .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-.study-toolbar { margin-bottom: 16px; }
+.study-toolbar { margin-bottom: 16px; column-gap: 24px; }
+.study-toolbar .toggle { margin-right: 0; } /* two checkboxes sit side by side */
 .toggle { display: inline-flex; align-items: center; gap: 8px; margin-right: auto; cursor: pointer; }
 .toggle input { width: 18px; height: 18px; }
 
@@ -682,7 +683,11 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
   font-size: 1.3rem;
   cursor: pointer;
 }
-.option { text-align: right; }
+.option { text-align: right; display: flex; flex-wrap: wrap; align-items: baseline; align-content: center; gap: 2px 16px; }
+/* The transliteration beside a Hebrew answer: on the left, or under the Hebrew when there's no room. */
+.opt-tr { font-family: var(--font-ui); font-size: .75em; font-style: italic; color: var(--muted); }
+.option .opt-tr { margin-right: auto; }
+.match-item.he .opt-tr { display: block; margin-top: 2px; }
 .option-row { position: relative; }
 .option-row .option { padding-left: 60px; }
 .option-speak {
@@ -704,7 +709,8 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
 
 .match-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
-.match-col { display: grid; gap: 10px; align-content: start; }
+/* Equal rows, so the English buttons line up with the taller Hebrew ones (Hebrew and transliteration). */
+.match-col { display: grid; gap: 10px; grid-auto-rows: 1fr; }
 .match-item.en { font-size: 1rem; text-align: left; }
 .match-item.he { text-align: right; }
 

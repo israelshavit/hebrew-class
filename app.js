@@ -31,6 +31,7 @@
     route: { view: "home" },
     lessonId: null,   // the lesson last opened; Self study and Live class follow it
     niqqud: readSetting("hebrewClass.niqqud", "1") !== "0",
+    showTr: readSetting("hebrewClass.transliteration", "1") !== "0", // transliteration on the quiz answers
     student: signedInStudent,          // { name, token } once signed in; token is empty without a PIN
     studentName: signedInStudent ? signedInStudent.name : "",
     // forgot: the "Forgot your PIN?" steps while open; choose: choosing a PIN after a temporary one
@@ -1301,17 +1302,27 @@
   }
 
   function niqqudToggle() {
+    return settingToggle("Show vowel marks (niqqud)", "niqqud", "hebrewClass.niqqud");
+  }
+
+  // Shown where answers are picked (the quiz and the Word of the day check).
+  function trToggle() {
+    return settingToggle("Show transliteration", "showTr", "hebrewClass.transliteration");
+  }
+
+  // A checkbox for a state flag that this browser remembers.
+  function settingToggle(label, key, setting) {
     return el("label", { class: "toggle" }, [
       el("input", {
         type: "checkbox",
-        checked: state.niqqud,
+        checked: state[key],
         onchange: function (e) {
-          state.niqqud = e.target.checked;
-          writeSetting("hebrewClass.niqqud", state.niqqud ? "1" : "0");
+          state[key] = e.target.checked;
+          writeSetting(setting, state[key] ? "1" : "0");
           render();
         }
       }),
-      "Show vowel marks (niqqud)"
+      label
     ]);
   }
 
@@ -1696,7 +1707,7 @@
       var item = quiz.items[quiz.index];
       body = item.type === "choice" ? renderChoice(quiz, item) : renderMatch(quiz, item);
     }
-    return el("div", null, [el("div", { class: "toolbar study-toolbar no-print" }, [niqqudToggle()]), body]);
+    return el("div", null, [el("div", { class: "toolbar study-toolbar no-print" }, [niqqudToggle(), trToggle()]), body]);
   }
 
   // The student's best score on each quiz of this lesson: from their report,
@@ -1783,9 +1794,8 @@
           lang: "he",
           dir: "rtl",
           disabled: answered,
-          onclick: function () { answerChoice(quiz, item, opt); },
-          text: heb(opt.he)
-        }),
+          onclick: function () { answerChoice(quiz, item, opt); }
+        }, heWithTr(opt)),
         speakButton(opt.he, "option-speak")
       ]);
     }));
@@ -1807,6 +1817,16 @@
       children.push(nextButton(quiz));
     }
     return el("div", { class: "card" }, children);
+  }
+
+  // A Hebrew answer button's content: the Hebrew, then its transliteration
+  // (on the left of the button, or under the Hebrew when there's no room),
+  // unless the student has turned it off.
+  function heWithTr(form) {
+    return [
+      el("span", { class: "opt-he", text: heb(form.he) }),
+      form.tr && state.showTr ? el("span", { class: "opt-tr", lang: "en", dir: "ltr", text: form.tr }) : null
+    ];
   }
 
   function answerChoice(quiz, item, opt) {
@@ -1844,9 +1864,8 @@
         dir: "rtl",
         disabled: round.pairs[i].matched,
         "aria-pressed": round.selHe === i ? "true" : "false",
-        onclick: function () { pickMatch(quiz, round, "he", i); },
-        text: heb(round.pairs[i].form.he)
-      });
+        onclick: function () { pickMatch(quiz, round, "he", i); }
+      }, heWithTr(round.pairs[i].form));
     }));
     var children = renderProgress(quiz).concat([
       el("p", { class: "prompt", text: "Match each English phrase to its Hebrew." }),
@@ -2111,7 +2130,8 @@
     }
     var w = state.wotd;
     if (!w) return el("p", { class: "notice", text: "There is no word of the day yet." });
-    var toolbar = el("div", { class: "toolbar study-toolbar no-print" }, [niqqudToggle()]);
+    // The word's own page always shows its transliteration; the checkbox is for the check.
+    var toolbar = el("div", { class: "toolbar study-toolbar no-print" }, [niqqudToggle(), w.step === "ask" ? trToggle() : null]);
     return el("div", { class: "cards-view" }, w.step === "ask" ? [toolbar, renderWordCheck(w)] : [
       toolbar,
       renderWordLearn(w, day === today),
@@ -2193,9 +2213,8 @@
           lang: "he",
           dir: "rtl",
           disabled: wrong,
-          onclick: function () { answerWord(w, opt); },
-          text: heb(opt.he)
-        }),
+          onclick: function () { answerWord(w, opt); }
+        }, heWithTr(opt)),
         speakButton(opt.he, "option-speak")
       ]);
     }));
