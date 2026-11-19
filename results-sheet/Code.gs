@@ -385,13 +385,20 @@ function emailTempPin(data) {
   var site = /^https:\/\/[^\s]+$/.test(String(data.siteUrl || "")) ? String(data.siteUrl) : "";
   var temp = String(100 + Math.floor(Math.random() * 900));
   try {
+    // The script doesn't know which language the student uses, so this one is
+    // in English and Spanish.
     MailApp.sendEmail({
       to: student.email,
-      subject: "Hebrew Class: your temporary PIN",
+      subject: "Hebrew Class: your temporary PIN / Clase de hebreo: tu PIN temporal",
       body: "Hello " + student.name + ",\n\n" +
         "Your teacher has reset your Hebrew Class PIN. Your temporary PIN is: " + temp + "\n\n" +
         "Sign in" + (site ? " at " + site : "") + " with your name and this PIN, then choose your own PIN. " +
-        "Your old PIN no longer works. Your scores are kept.\n"
+        "Your old PIN no longer works. Your scores are kept.\n\n" +
+        "---\n\n" +
+        "Hola, " + student.name + ":\n\n" +
+        "Tu docente restableció tu PIN de la Clase de hebreo. Tu PIN temporal es: " + temp + "\n\n" +
+        "Entra" + (site ? " en " + site : "") + " con tu nombre y este PIN, y luego elige tu propio PIN. " +
+        "Tu PIN anterior ya no funciona. Tus puntuaciones se conservan.\n"
     });
   } catch (err) {
     return reply({ ok: false, error: "mail-failed" });
@@ -464,7 +471,14 @@ function sendPinCode(data) {
 
   var code = String(Math.floor(100000 + Math.random() * 900000));
   try {
-    MailApp.sendEmail({
+    // In Spanish when the student asked from the site in Spanish.
+    MailApp.sendEmail(data.lang === "es" ? {
+      to: student.email,
+      subject: "Clase de hebreo: tu código para cambiar el PIN",
+      body: "Hola, " + student.name + ":\n\n" +
+        "Tu código para elegir un PIN nuevo de la Clase de hebreo es: " + code + "\n\n" +
+        "Sirve durante " + CODE_MINUTES + " minutos. Si no lo pediste, puedes ignorar este correo; tu PIN sigue igual.\n"
+    } : {
       to: student.email,
       subject: "Hebrew Class: your PIN reset code",
       body: "Hello " + student.name + ",\n\n" +
@@ -890,18 +904,21 @@ function boardPoints(now) {
 function translate(data) {
   var text = String(data.text || "").trim().replace(/\s+/g, " ").slice(0, 80);
   if (!text) return reply({ ok: false, error: "bad-request" });
+  // From English, or from Spanish when the site is used in Spanish. The reply
+  // says which, so the site knows this script understands Spanish.
+  var from = data.from === "es" ? "es" : "en";
   var cache = CacheService.getScriptCache();
-  var cacheKey = "tr:" + sha(text.toLowerCase());
+  var cacheKey = "tr:" + (from === "es" ? "es:" : "") + sha(text.toLowerCase());
   var hebrew = cache.get(cacheKey);
   if (!hebrew) {
     try {
-      hebrew = LanguageApp.translate(text, "en", "he");
+      hebrew = LanguageApp.translate(text, from, "he");
     } catch (err) {
       return reply({ ok: false, error: "translate-failed" });
     }
     if (hebrew) cache.put(cacheKey, hebrew, 21600);
   }
-  return reply({ ok: true, text: text, hebrew: hebrew });
+  return reply({ ok: true, text: text, hebrew: hebrew, from: from });
 }
 
 /* ---------- Sheets ---------- */

@@ -90,6 +90,60 @@
     try { localStorage.removeItem(key); } catch (e) { /* ignore */ }
   }
 
+  /* ---------- Interface language ----------
+     English or Spanish, chosen on each browser with the menu in the top bar.
+     lang/es.js has the Spanish for each English text; anything missing there
+     shows in English. Hebrew is still what's taught: in Spanish, a lesson's
+     meanings, titles and notes come from its Spanish ("es") parts. */
+
+  var LANGUAGES = [{ code: "en", name: "English" }, { code: "es", name: "Español" }];
+  // English until someone chooses Español on this browser.
+  var uiLang = readSetting("hebrewClass.lang", "") === "es" ? "es" : "en";
+  var missingText = {};
+  document.documentElement.lang = uiLang;
+
+  // The interface text in the chosen language; {name} is filled in from vars.
+  // "Live class|menu" is "Live class" in English, with its own Spanish (a
+  // shorter one, for the top menu to fit across a phone).
+  function t(text, vars) {
+    var out = text.split("|")[0];
+    if (uiLang === "es") {
+      var table = (HC.text && HC.text.es) || {};
+      if (Object.prototype.hasOwnProperty.call(table, text)) out = table[text];
+      else if (config.testing && !missingText[text]) {
+        missingText[text] = true;
+        console.warn("No Spanish yet for: " + text); // on localhost only, to catch new text
+      }
+    }
+    return vars ? out.replace(/\{(\w+)\}/g, function (m, key) { return key in vars ? String(vars[key]) : m; }) : out;
+  }
+
+  // Dates: the browser's own format in English, Spanish month and day names in Spanish.
+  function dateLocale() {
+    return uiLang === "es" ? "es" : undefined;
+  }
+
+  function setLanguage(code) {
+    if (code === uiLang || (code !== "en" && code !== "es")) return;
+    uiLang = code;
+    writeSetting("hebrewClass.lang", code);
+    document.documentElement.lang = code;
+    stopListening(); // How to say listens for the language chosen
+    render();
+  }
+
+  // The language menu in the top bar, there before and after signing in.
+  function languageMenu() {
+    return el("select", {
+      class: "lang-select",
+      "aria-label": "Language / Idioma",
+      title: "Language / Idioma",
+      onchange: function (e) { setLanguage(e.target.value); }
+    }, LANGUAGES.map(function (l) {
+      return el("option", { value: l.code, selected: l.code === uiLang, text: l.name });
+    }));
+  }
+
   // A student's email and live class are kept only while they're signed in, so
   // a shared computer opens on an empty sign-in form.
   function forgetSavedPerson() {
@@ -118,14 +172,17 @@
 
   // Rows are ["English", "translit", "Hebrew"], or for male/female forms
   // ["English (m/f)", ["translit m", "translit f"], ["Hebrew m", "Hebrew f"]].
+  // A fourth item is the meaning in Spanish. A lesson and each of its sections
+  // can have es: { title, subtitle, notes, explanation } in Spanish.
   function normalizeLesson(raw) {
     var forms = [];
     var sections = (raw.sections || []).map(function (section, si) {
       return {
         title: section.title,
         explanation: section.explanation || "",
+        es: section.es || {},
         rows: (section.rows || []).map(function (r, ri) {
-          var row = { id: si + "-" + ri, en: r[0], forms: [] };
+          var row = { id: si + "-" + ri, en: r[0], es: r[3] || "", forms: [] };
           var tr = r[1];
           var he = r[2];
           if (Array.isArray(he)) {
@@ -153,7 +210,7 @@
       video: raw.video || "",
       videoTitle: raw.videoTitle || "",
       notes: raw.notes || "",
-      name: raw.title || "Untitled lesson", // becomes "Lesson N – title" once every lesson has loaded
+      es: raw.es || {},
       sections: sections,
       forms: forms
     };
@@ -175,7 +232,6 @@
           // The oldest lesson is Lesson 1.
           lessons.forEach(function (lesson, i) {
             lesson.number = lessons.length - i;
-            lesson.name = "Lesson " + lesson.number + " – " + lesson.title;
           });
           done();
         }
@@ -189,6 +245,22 @@
       if (lessons[i].id === id) return lessons[i];
     }
     return null;
+  }
+
+  // A lesson's or section's title, subtitle, notes or explanation in the
+  // interface language, when the lesson file has it in Spanish.
+  function localText(item, field) {
+    return (uiLang === "es" && item.es && item.es[field]) || item[field];
+  }
+
+  // A phrase's meaning: its Spanish in Spanish (when the row has it), otherwise its English.
+  function meaning(row, language) {
+    return ((language || uiLang) === "es" && row.es) || row.en;
+  }
+
+  // "Lesson 2 – Small Talk"
+  function lessonName(lesson) {
+    return t("Lesson {n} – {title}", { n: lesson.number, title: localText(lesson, "title") });
   }
 
   /* ---------- Helpers ---------- */
@@ -281,7 +353,7 @@
   var TTS_URL = "https://translate.google.com/translate_tts?ie=UTF-8&tl=iw&client=tw-ob&q=";
 
   function warnNoVoice() {
-    var message = "Couldn't play the sound. Check your internet connection and volume, or open the site in Microsoft Edge or on a phone.";
+    var message = t("Couldn't play the sound. Check your internet connection and volume, or open the site in Microsoft Edge or on a phone.");
     var old = document.getElementById("speech-toast");
     if (old) old.remove();
     var toast = el("div", { class: "toast no-print", id: "speech-toast", role: "status", text: message });
@@ -333,8 +405,8 @@
     var btn = el("button", {
       class: "speak-btn no-print" + (extraClass ? " " + extraClass : ""),
       type: "button",
-      title: "Listen",
-      "aria-label": "Listen to the Hebrew",
+      title: t("Listen"),
+      "aria-label": t("Listen to the Hebrew"),
       onclick: function (e) { e.stopPropagation(); speak(texts); }
     });
     btn.appendChild(speakerIcon());
@@ -355,16 +427,39 @@
     var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
     if (!m) return iso || "";
     var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-    return d.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+    return d.toLocaleDateString(dateLocale(), { day: "numeric", month: "long", year: "numeric" });
   }
 
-  // English prompt for one form, making the gender explicit.
-  function promptFor(form) {
-    var en = form.row.en;
-    if (!form.g) return en;
-    if (/\(to m\/f\)/.test(en)) return en.replace(/\(to m\/f\)/, form.g === "m" ? "(to a man)" : "(to a woman)");
-    if (/\(m\/f\)/.test(en)) return en.replace(/\(m\/f\)/, form.g === "m" ? "(male)" : "(female)");
-    return en + (form.g === "m" ? " (male)" : " (female)");
+  // A row's gender marks: "(to m/f)" for talking to a man or a woman (in
+  // Spanish "(a él/ella)"), and "(m/f)" for a male or female speaker.
+  var TO_MARK = /\s*\((?:to m\/f|a él\/ella)\)/;
+  var MF_MARK = /\s*\(m\/f\)/;
+  var GENDER_WORDS = {
+    en: { toM: "(to a man)", toF: "(to a woman)", m: "(male)", f: "(female)" },
+    es: { toM: "(a un hombre)", toF: "(a una mujer)", m: "(hombre)", f: "(mujer)" }
+  };
+
+  // The prompt for one form, in the interface language or the one asked for
+  // (quiz misses are saved in English for the teacher), making the gender
+  // explicit. In Spanish, "cansado/a" becomes "cansado" or "cansada".
+  function promptFor(form, language) {
+    language = language === "en" || language === "es" ? language : uiLang;
+    var row = form.row;
+    var text = meaning(row, language);
+    if (!form.g) return text;
+    var male = form.g === "m";
+    var words = GENDER_WORDS[language];
+    if (language === "es" && row.es) {
+      text = text.replace(/([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)\/a(?![A-Za-zÁÉÍÓÚÜÑáéíóúüñ])/g, function (m, word) {
+        return male ? word : /o$/.test(word) ? word.slice(0, -1) + "a" : word + "a";
+      });
+    }
+    if (TO_MARK.test(row.en)) {
+      var to = male ? words.toM : words.toF;
+      return TO_MARK.test(text) ? text.replace(TO_MARK, " " + to) : text + " " + to;
+    }
+    var who = male ? words.m : words.f;
+    return MF_MARK.test(text) ? text.replace(MF_MARK, " " + who) : text + " " + who;
   }
 
   // A lesson's tabs besides its sheet, as they appear in the address.
@@ -460,8 +555,8 @@
     else if (view === "progress") app.appendChild(isTeacher() ? renderTeacher() : renderMyProgress());
     else if (view === "share") app.appendChild(renderShare());
     else app.appendChild(renderHome());
-    var title = lesson ? lesson.name : PAGE_TITLES[view];
-    document.title = (title ? title + " · " : "") + "Hebrew Class";
+    var title = lesson ? lessonName(lesson) : PAGE_TITLES[view] && t(PAGE_TITLES[view]);
+    document.title = (title ? title + " · " : "") + t("Hebrew Class");
     fitSheet();
   }
 
@@ -587,10 +682,10 @@
         setStudent(name, "");
         done();
       } else {
-        done(SIGN_IN_ERRORS[res && res.error] || "Couldn't sign you in. Try again.");
+        done(t(SIGN_IN_ERRORS[res && res.error] || "Couldn't sign you in. Try again."));
       }
     }, function () {
-      done("Couldn't reach the class service. Check your connection and try again.");
+      done(t("Couldn't reach the class service. Check your connection and try again."));
     });
   }
 
@@ -617,12 +712,12 @@
       f.busy = false;
       if (res && res.ok) onOk(res);
       else if (res && res.error === "no-email") f.step = "no-email"; // a code can't help: send them to the teacher
-      else if (res && res.error === "bad-request") f.error = "Resetting by email isn't switched on yet. Ask your teacher to reset your PIN.";
-      else f.error = FORGOT_ERRORS[res && res.error] || "Something went wrong. Try again, or ask your teacher to reset your PIN.";
+      else if (res && res.error === "bad-request") f.error = t("Resetting by email isn't switched on yet. Ask your teacher to reset your PIN.");
+      else f.error = t(FORGOT_ERRORS[res && res.error] || "Something went wrong. Try again, or ask your teacher to reset your PIN.");
       render();
     }, function () {
       f.busy = false;
-      f.error = "Couldn't reach the class service. Check your connection and try again.";
+      f.error = t("Couldn't reach the class service. Check your connection and try again.");
       render();
     });
   }
@@ -645,17 +740,17 @@
       if (res && res.ok) {
         f.name = res.name || name;
         f.sentTo = res.sentTo || "";
-        if (!res.hasPin) back("name", FORGOT_ERRORS["no-pin"]);
+        if (!res.hasPin) back("name", t(FORGOT_ERRORS["no-pin"]));
         else back(res.hasEmail ? "email" : "no-email");
       } else if (res && res.error === "bad-request") {
         // A Google script from before this check: ask for the code straight away.
         f.legacy = true;
         back("name");
       } else {
-        back("name", FORGOT_ERRORS[res && res.error] || "Something went wrong. Try again, or ask your teacher to reset your PIN.");
+        back("name", t(FORGOT_ERRORS[res && res.error] || "Something went wrong. Try again, or ask your teacher to reset your PIN."));
       }
     }, function () {
-      if (state.auth.forgot === f) back("name", "Couldn't reach the class service. Check your connection and try again.");
+      if (state.auth.forgot === f) back("name", t("Couldn't reach the class service. Check your connection and try again."));
     });
   }
 
@@ -666,19 +761,19 @@
     function sendCode(name) {
       f.name = name;
       f.code = "";
-      forgotCall({ action: "pinCode", name: name }, function (res) {
+      forgotCall({ action: "pinCode", name: name, lang: uiLang }, function (res) { // the email comes in this language
         f.step = "code";
-        f.sentTo = res.sentTo || "your email";
+        f.sentTo = res.sentTo || t("your email");
       });
     }
     var error = f.error ? el("p", { class: "notice error", role: "alert", text: f.error }) : null;
-    var backButton = el("button", { class: "btn", type: "button", text: "Back to sign in", onclick: back });
+    var backButton = el("button", { class: "btn", type: "button", text: t("Back to sign in"), onclick: back });
 
     if (f.step === "checking") {
       return el("section", { class: "signin" }, [
-        el("h1", { text: "Forgot your PIN?" }),
+        el("h1", { text: t("Forgot your PIN?") }),
         el("div", { class: "card" }, [
-          el("p", { style: "margin-top:0", role: "status", text: "Checking how we can help " + f.name + "…" }),
+          el("p", { style: "margin-top:0", role: "status", text: t("Checking how we can help {name}…", { name: f.name }) }),
           el("div", { class: "actions" }, [backButton])
         ])
       ]);
@@ -686,13 +781,13 @@
 
     if (f.step === "no-email") {
       return el("section", { class: "signin" }, [
-        el("h1", { text: "Ask your teacher" }),
+        el("h1", { text: t("Ask your teacher") }),
         el("div", { class: "card" }, [
-          el("p", { style: "margin-top:0", text: "There's no email saved for " + f.name + ", so we can't send a code." }),
-          el("p", { text: "Ask your teacher to clear your PIN. Then sign in with just your name and type a new PIN. Your scores are kept." }),
-          el("p", { class: "hint", text: "Tip: when you sign in, add your email too. Next time you can reset your PIN yourself." }),
+          el("p", { style: "margin-top:0", text: t("There's no email saved for {name}, so we can't send a code.", { name: f.name }) }),
+          el("p", { text: t("Ask your teacher to clear your PIN. Then sign in with just your name and type a new PIN. Your scores are kept.") }),
+          el("p", { class: "hint", text: t("Tip: when you sign in, add your email too. Next time you can reset your PIN yourself.") }),
           el("div", { class: "actions" }, [
-            el("button", { class: "btn primary", type: "button", text: "Back to sign in", onclick: back })
+            el("button", { class: "btn primary", type: "button", text: t("Back to sign in"), onclick: back })
           ])
         ])
       ]);
@@ -700,15 +795,15 @@
 
     if (f.step === "email") {
       return el("section", { class: "signin" }, [
-        el("h1", { text: "Forgot your PIN?" }),
+        el("h1", { text: t("Forgot your PIN?") }),
         el("div", { class: "card" }, [
-          el("p", { style: "margin-top:0", text: "We'll email a 6-digit code to " + f.sentTo + ", the address saved for " + f.name + ". With the code you choose a new PIN." }),
+          el("p", { style: "margin-top:0", text: t("We'll email a 6-digit code to {email}, the address saved for {name}. With the code you choose a new PIN.", { email: f.sentTo, name: f.name }) }),
           error,
           el("div", { class: "actions" }, [
-            el("button", { class: "btn primary", type: "button", disabled: f.busy, text: f.busy ? "Sending…" : "Email me a code", onclick: function () { if (!f.busy) sendCode(f.name); } }),
+            el("button", { class: "btn primary", type: "button", disabled: f.busy, text: f.busy ? t("Sending…") : t("Email me a code"), onclick: function () { if (!f.busy) sendCode(f.name); } }),
             backButton
           ]),
-          el("p", { class: "hint", text: "Not your email, or no email arriving? Look in your spam folder, or ask your teacher." })
+          el("p", { class: "hint", text: t("Not your email, or no email arriving? Look in your spam folder, or ask your teacher.") })
         ])
       ]);
     }
@@ -716,8 +811,8 @@
     if (f.step === "name") {
       var nameInput = el("input", { type: "text", id: "forgot-name", required: true, maxlength: "60", autocomplete: "name", value: f.name || "" });
       return el("section", { class: "signin" }, [
-        el("h1", { text: "Forgot your PIN?" }),
-        el("p", { class: "lede", text: "Type your name and we'll see how to help: a code by email, or your teacher." }),
+        el("h1", { text: t("Forgot your PIN?") }),
+        el("p", { class: "lede", text: t("Type your name and we'll see how to help: a code by email, or your teacher.") }),
         el("form", { class: "card", onsubmit: function (e) {
           e.preventDefault();
           var name = nameInput.value.trim().replace(/\s+/g, " ");
@@ -726,13 +821,13 @@
           else checkForgotName(name);
         } }, [
           el("div", { class: "field" }, [
-            el("label", { for: "forgot-name", text: "Your name" }),
+            el("label", { for: "forgot-name", text: t("Your name") }),
             nameInput,
-            el("span", { class: "field-hint", text: "Exactly as you sign in." })
+            el("span", { class: "field-hint", text: t("Exactly as you sign in.") })
           ]),
           error,
           el("div", { class: "actions" }, [
-            el("button", { class: "btn primary", type: "submit", disabled: f.busy, text: f.busy ? "Sending…" : f.legacy ? "Email me a code" : "Continue" }),
+            el("button", { class: "btn primary", type: "submit", disabled: f.busy, text: f.busy ? t("Sending…") : f.legacy ? t("Email me a code") : t("Continue") }),
             backButton
           ])
         ])
@@ -741,10 +836,10 @@
 
     // What was typed survives the redraw after a wrong code.
     var codeInput = el("input", { type: "text", id: "forgot-code", required: true, inputmode: "numeric", pattern: "[0-9 ]{6,7}", maxlength: "7", autocomplete: "one-time-code", value: f.code || "" });
-    var pinInput = el("input", { type: "password", id: "forgot-pin", required: true, inputmode: "numeric", pattern: "[0-9]{4,8}", maxlength: "8", autocomplete: "off", title: "4 to 8 digits", value: f.pin || "" });
+    var pinInput = el("input", { type: "password", id: "forgot-pin", required: true, inputmode: "numeric", pattern: "[0-9]{4,8}", maxlength: "8", autocomplete: "off", title: t("4 to 8 digits"), value: f.pin || "" });
     return el("section", { class: "signin" }, [
-      el("h1", { text: "Choose a new PIN" }),
-      el("p", { class: "lede", text: "We sent a 6-digit code to " + f.sentTo + ". It works for 15 minutes. If it isn't there, look in your spam folder." }),
+      el("h1", { text: t("Choose a new PIN") }),
+      el("p", { class: "lede", text: t("We sent a 6-digit code to {email}. It works for 15 minutes. If it isn't there, look in your spam folder.", { email: f.sentTo }) }),
       el("form", { class: "card", onsubmit: function (e) {
         e.preventDefault();
         var code = codeInput.value.replace(/\s+/g, "");
@@ -759,17 +854,17 @@
           loadForRoute();
         });
       } }, [
-        el("div", { class: "field" }, [el("label", { for: "forgot-code", text: "Code from the email" }), codeInput]),
+        el("div", { class: "field" }, [el("label", { for: "forgot-code", text: t("Code from the email") }), codeInput]),
         el("div", { class: "field" }, [
-          el("label", { for: "forgot-pin", text: "New PIN" }),
+          el("label", { for: "forgot-pin", text: t("New PIN") }),
           pinInput,
-          el("span", { class: "field-hint", text: "4 to 8 digits. You'll use it to sign in from now on." })
+          el("span", { class: "field-hint", text: t("4 to 8 digits. You'll use it to sign in from now on.") })
         ]),
         error,
         el("div", { class: "actions" }, [
-          el("button", { class: "btn primary", type: "submit", disabled: f.busy, text: f.busy ? "Saving…" : "Save PIN and sign in" }),
-          el("button", { class: "btn", type: "button", disabled: f.busy, text: "Send a new code", onclick: function () { sendCode(f.name); } }),
-          el("button", { class: "btn", type: "button", text: "Back to sign in", onclick: back })
+          el("button", { class: "btn primary", type: "submit", disabled: f.busy, text: f.busy ? t("Saving…") : t("Save PIN and sign in") }),
+          el("button", { class: "btn", type: "button", disabled: f.busy, text: t("Send a new code"), onclick: function () { sendCode(f.name); } }),
+          el("button", { class: "btn", type: "button", text: t("Back to sign in"), onclick: back })
         ])
       ])
     ]);
@@ -779,24 +874,24 @@
   function renderChoosePin() {
     var auth = state.auth;
     var c = auth.choose;
-    var pinInput = el("input", { type: "password", id: "choose-pin", required: true, inputmode: "numeric", pattern: "[0-9]{4,8}", maxlength: "8", autocomplete: "off", title: "4 to 8 digits" });
+    var pinInput = el("input", { type: "password", id: "choose-pin", required: true, inputmode: "numeric", pattern: "[0-9]{4,8}", maxlength: "8", autocomplete: "off", title: t("4 to 8 digits") });
     return el("section", { class: "signin" }, [
-      el("h1", { text: "Choose your own PIN" }),
-      el("p", { class: "lede", text: "That's your temporary PIN. Now choose a PIN only you know." }),
+      el("h1", { text: t("Choose your own PIN") }),
+      el("p", { class: "lede", text: t("That's your temporary PIN. Now choose a PIN only you know.") }),
       el("form", { class: "card", onsubmit: function (e) {
         e.preventDefault();
         var newPin = pinInput.value.trim();
         if (newPin && !auth.busy) signInStudent(c.name, c.pin, c.email, newPin);
       } }, [
         el("div", { class: "field" }, [
-          el("label", { for: "choose-pin", text: "New PIN" }),
+          el("label", { for: "choose-pin", text: t("New PIN") }),
           pinInput,
-          el("span", { class: "field-hint", text: "4 to 8 digits. You'll use it to sign in from now on; the temporary PIN stops working." })
+          el("span", { class: "field-hint", text: t("4 to 8 digits. You'll use it to sign in from now on; the temporary PIN stops working.") })
         ]),
         auth.error ? el("p", { class: "notice error", role: "alert", text: auth.error }) : null,
         el("div", { class: "actions" }, [
-          el("button", { class: "btn primary", type: "submit", disabled: auth.busy, text: auth.busy ? "Saving…" : "Save PIN and sign in" }),
-          el("button", { class: "btn", type: "button", text: "Back to sign in", onclick: function () { auth.choose = null; auth.error = ""; render(); } })
+          el("button", { class: "btn primary", type: "submit", disabled: auth.busy, text: auth.busy ? t("Saving…") : t("Save PIN and sign in") }),
+          el("button", { class: "btn", type: "button", text: t("Back to sign in"), onclick: function () { auth.choose = null; auth.error = ""; render(); } })
         ])
       ])
     ]);
@@ -804,7 +899,7 @@
 
   function renderSignIn() {
     var auth = state.auth;
-    var t = state.teacher;
+    var teacher = state.teacher;
     if (auth.forgot) return renderForgotPin();
     if (auth.choose) return renderChoosePin();
     // Empty unless typed since the page opened, so the last person's name never shows.
@@ -812,12 +907,12 @@
       oninput: function (e) { auth.name = e.target.value; } });
     var emailInput = el("input", { type: "email", id: "signin-email", maxlength: "120", autocomplete: "email", value: auth.email,
       oninput: function (e) { auth.email = e.target.value; } });
-    var pinInput = el("input", { type: "password", id: "signin-pin", inputmode: "numeric", pattern: "[0-9]{3,8}", maxlength: "8", autocomplete: "off", title: "4 to 8 digits, or a 3-digit temporary PIN from your email" });
+    var pinInput = el("input", { type: "password", id: "signin-pin", inputmode: "numeric", pattern: "[0-9]{3,8}", maxlength: "8", autocomplete: "off", title: t("4 to 8 digits, or a 3-digit temporary PIN from your email") });
     var passInput = el("input", { type: "password", id: "signin-passcode", required: true, autocomplete: "current-password" });
 
     return el("section", { class: "signin" }, [
-      el("h1", { text: "Welcome to Hebrew Class" }),
-      el("p", { class: "lede", text: "Sign in with your name to see the lessons and keep track of your progress." }),
+      el("h1", { text: t("Welcome to Hebrew Class") }),
+      el("p", { class: "lede", text: t("Sign in with your name to see the lessons and keep track of your progress.") }),
       el("form", {
         class: "card",
         onsubmit: function (e) {
@@ -832,37 +927,37 @@
         }
       }, [
         el("div", { class: "field" }, [
-          el("label", { for: "signin-name", text: "Your name" }),
+          el("label", { for: "signin-name", text: t("Your name") }),
           nameInput,
-          el("span", { class: "field-hint", text: "Use the same name every time." })
+          el("span", { class: "field-hint", text: t("Use the same name every time.") })
         ]),
         el("div", { class: "field" }, [
-          el("label", { for: "signin-email", text: "Email (optional)" }),
+          el("label", { for: "signin-email", text: t("Email (optional)") }),
           emailInput,
-          el("span", { class: "field-hint", text: "Only your teacher sees it." })
+          el("span", { class: "field-hint", text: t("Only your teacher sees it.") })
         ]),
         el("div", { class: "field" }, [
-          el("label", { for: "signin-pin", text: "PIN (optional)" }),
+          el("label", { for: "signin-pin", text: t("PIN (optional)") }),
           pinInput,
-          el("span", { class: "field-hint", text: "Choose 4 digits and only you can see your progress report. You'll need it to sign in again." }),
+          el("span", { class: "field-hint", text: t("Choose 4 digits and only you can see your progress report. You'll need it to sign in again.") }),
           el("span", { class: "field-hint" }, [
-            el("button", { class: "linklike", type: "button", text: "Forgot your PIN?", onclick: function () {
+            el("button", { class: "linklike", type: "button", text: t("Forgot your PIN?"), onclick: function () {
               auth.error = "";
               var name = nameInput.value.trim().replace(/\s+/g, " ");
               auth.forgot = { step: "name", name: name };
               if (name) checkForgotName(name); // the name is already typed: check it straight away
               else render();
             } }),
-            document.createTextNode(" Get a code by email, or ask your teacher. Your scores are kept.")
+            document.createTextNode(" " + t("Get a code by email, or ask your teacher. Your scores are kept."))
           ])
         ]),
         auth.error ? el("p", { class: "notice error", role: "alert", text: auth.error }) : null,
-        el("div", { class: "actions" }, [el("button", { class: "btn primary", type: "submit", disabled: auth.busy, text: auth.busy ? "Signing in…" : "Sign in" })]),
-        config.resultsUrl ? el("p", { class: "field-hint signin-note", text: "Your teacher also sees which country you're in, from your device's time zone." }) : null
+        el("div", { class: "actions" }, [el("button", { class: "btn primary", type: "submit", disabled: auth.busy, text: auth.busy ? t("Signing in…") : t("Sign in") })]),
+        config.resultsUrl ? el("p", { class: "field-hint signin-note", text: t("Your teacher also sees which country you're in, from your device's time zone.") }) : null
       ]),
-      config.resultsUrl ? el("details", { class: "teacher-signin", open: !!t.error }, [
-        el("summary", { text: "Teacher? Sign in here" }),
-        t.error ? el("p", { class: "notice error", role: "alert", text: t.error }) : null,
+      config.resultsUrl ? el("details", { class: "teacher-signin", open: !!teacher.error }, [
+        el("summary", { text: t("Teacher? Sign in here") }),
+        teacher.error ? el("p", { class: "notice error", role: "alert", text: t(teacher.error) }) : null,
         el("form", {
           onsubmit: function (e) {
             e.preventDefault();
@@ -870,8 +965,8 @@
             if (code) signInTeacher(code);
           }
         }, [
-          el("div", { class: "field" }, [el("label", { for: "signin-passcode", text: "Teacher passcode" }), passInput]),
-          el("button", { class: "btn", type: "submit", text: "Sign in as teacher" })
+          el("div", { class: "field" }, [el("label", { for: "signin-passcode", text: t("Teacher passcode") }), passInput]),
+          el("button", { class: "btn", type: "submit", text: t("Sign in as teacher") })
         ])
       ]) : null
     ]);
@@ -898,14 +993,17 @@
     nav.textContent = "";
     user.textContent = "";
     nav.hidden = !signedIn();
+    var brand = document.querySelector(".brand");
+    if (brand && brand.firstChild && brand.firstChild.nodeType === 3) brand.firstChild.nodeValue = t("Hebrew Class") + " ";
     // On this computer the site talks to the test copy of the sheet; say so.
-    if (config.testing) user.appendChild(el("span", { class: "test-badge", title: "Using the test copy of the Google Sheet", text: "Test data" }));
+    if (config.testing) user.appendChild(el("span", { class: "test-badge", title: t("Using the test copy of the Google Sheet"), text: t("Test data") }));
+    user.appendChild(languageMenu());
     var view = state.route.view;
     function link(href, text, active, icon) {
       return el("a", { class: "mainnav-link" + (active ? " active" : ""), href: href, "aria-current": active ? "page" : null }, [icon, text]);
     }
     if (!signedIn()) {
-      user.appendChild(el("a", { class: "topnav-out", href: "#/teacher", text: "Teacher" }));
+      user.appendChild(el("a", { class: "topnav-out", href: "#/teacher", text: t("Teacher") }));
       return;
     }
     var tab = view === "lesson" ? state.route.tab : "";
@@ -914,38 +1012,38 @@
     // A running class (known once the Live class page has checked) is where Live class goes.
     var liveLesson = (live.remote && live.remote.running && findLesson(live.remote.lessonId)) || lesson;
     nav.appendChild(el("div", { class: "mainnav-inner" }, [
-      link("#/", "Lessons", view === "home" || tab === "sheet"),
-      link(lesson ? lessonUrl(lesson, "cards") : "#/study", "Self study", inStudy),
-      link(liveLesson ? lessonUrl(liveLesson, "live") : "#/", "Live class", tab === "live", liveDot()),
+      link("#/", t("Lessons"), view === "home" || tab === "sheet"),
+      link(lesson ? lessonUrl(lesson, "cards") : "#/study", t("Self study"), inStudy),
+      link(liveLesson ? lessonUrl(liveLesson, "live") : "#/", t("Live class|menu"), tab === "live", liveDot()),
       isTeacher()
-        ? link("#/teacher", "Teacher", view === "teacher" || view === "progress")
-        : link("#/progress", "My progress", view === "progress"),
-      link("#/share", "Share", view === "share")
+        ? link("#/teacher", t("Teacher"), view === "teacher" || view === "progress")
+        : link("#/progress", t("My progress"), view === "progress"),
+      link("#/share", t("Share"), view === "share")
     ]));
     if (!isTeacher()) user.appendChild(el("span", { class: "topnav-name", text: state.student.name }));
-    user.appendChild(el("button", { class: "topnav-out", type: "button", text: "Sign out", onclick: signOut }));
+    user.appendChild(el("button", { class: "topnav-out", type: "button", text: t("Sign out"), onclick: signOut }));
   }
 
   function renderHome() {
     var wrap = el("section", null, [
       renderBoard(),
-      el("h1", { text: "Weekly lessons" }),
-      el("p", { class: "lede", text: "Open a lesson to see and print its one-page sheet." })
+      el("h1", { text: t("Weekly lessons") }),
+      el("p", { class: "lede", text: t("Open a lesson to see and print its one-page sheet.") })
     ]);
     if (state.loadErrors.length) {
-      wrap.appendChild(el("p", { class: "notice error", text: "Some lessons could not be loaded: " + state.loadErrors.join(", ") }));
+      wrap.appendChild(el("p", { class: "notice error", text: t("Some lessons could not be loaded: ") + state.loadErrors.join(", ") }));
     }
     if (!lessons.length) {
-      wrap.appendChild(el("p", { class: "notice", text: "No lessons yet." }));
+      wrap.appendChild(el("p", { class: "notice", text: t("No lessons yet.") }));
       return wrap;
     }
     var list = el("ul", { class: "lesson-list" });
     lessons.forEach(function (lesson, i) {
       list.appendChild(el("li", null, [
         el("a", { class: "lesson-card", href: lessonUrl(lesson, "sheet") }, [
-          i === 0 ? el("span", { class: "lesson-latest", text: "Latest" }) : null,
-          el("span", { class: "lesson-title", text: lesson.name }),
-          el("span", { class: "lesson-meta", text: lesson.sections.reduce(function (n, sec) { return n + sec.rows.length; }, 0) + " phrases in " + lesson.sections.length + " sections" })
+          i === 0 ? el("span", { class: "lesson-latest", text: t("Latest") }) : null,
+          el("span", { class: "lesson-title", text: lessonName(lesson) }),
+          el("span", { class: "lesson-meta", text: t("{phrases} phrases in {sections} sections", { phrases: lesson.sections.reduce(function (n, sec) { return n + sec.rows.length; }, 0), sections: lesson.sections.length }) })
         ])
       ]));
     });
@@ -1039,13 +1137,21 @@
   }
 
   function pointsText(n) {
-    return n + (n === 1 ? " point" : " points");
+    return t(n === 1 ? "{n} point" : "{n} points", { n: n });
   }
 
   // "Dana", "Dana and Moshe", "Dana, Moshe and Rina"
   function namesText(list) {
     var names = list.map(function (s) { return s.name; });
-    return names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names[names.length - 1] : names[0];
+    if (names.length < 2) return names[0];
+    var last = names[names.length - 1];
+    var joined = t("{list} and {last}", { list: names.slice(0, -1).join(", "), last: last });
+    // Spanish "y" becomes "e" before an "i" sound: "Dana e Isabel".
+    var tail = " y " + last;
+    if (uiLang === "es" && /^h?i(?![aeiouáéíóú])/i.test(last) && joined.slice(-tail.length) === tail) {
+      return joined.slice(0, -tail.length) + " e " + last;
+    }
+    return joined;
   }
 
   function renderBoard() {
@@ -1055,35 +1161,35 @@
     var leaders = d.leaders || [];
     var myKey = state.student ? studentKey(state.student.name) : "";
     return el("section", { class: "card champ-board no-print", "aria-labelledby": "champ-title" }, [
-      el("h2", { id: "champ-title", class: "visually-hidden", text: "Championship board" }),
+      el("h2", { id: "champ-title", class: "visually-hidden", text: t("Championship board") }),
       champions.length ? el("p", { class: "champ-last" }, [
         el("span", { class: "champ-cup", "aria-hidden": "true", text: "🏆" }),
         el("span", null, [
-          champions.length > 1 ? "Last week's Hebrew champions: " : "Last week's Hebrew champion: ",
+          t(champions.length > 1 ? "Last week's Hebrew champions:" : "Last week's Hebrew champion:") + " ",
           el("strong", { text: namesText(champions) }),
           el("span", { class: "champ-last-points", text: " · " + pointsText(champions[0].points) })
         ])
       ]) : null,
-      el("h3", { class: "champ-title", text: "This week so far" }),
+      el("h3", { class: "champ-title", text: t("This week so far") }),
       leaders.length ? el("ul", { class: "champ-list" }, leaders.map(function (s) {
         var mine = myKey && studentKey(s.name) === myKey;
         return el("li", { class: mine ? "mine" : null }, [
           el("span", { class: "champ-place", text: MEDALS[s.place - 1] || String(s.place) }),
-          el("span", { class: "champ-name", text: s.name + (mine ? " (you)" : "") }),
+          el("span", { class: "champ-name", text: s.name + (mine ? " " + t("(you)") : "") }),
           el("span", { class: "champ-points", text: pointsText(s.points) })
         ]);
       })) : el("p", { class: "champ-empty", text: d.me && d.me.points
-        ? "Nobody is on the board yet this week." // the student has points but their name is hidden
-        : "No points yet this week. Take a quiz or practise the Word of the day to lead the board!" }),
+        ? t("Nobody is on the board yet this week.") // the student has points but their name is hidden
+        : t("No points yet this week. Take a quiz or practise the Word of the day to lead the board!") }),
       renderMyPoints(d.me, leaders.length > 0),
       el("details", { class: "champ-how", open: state.board.howOpen, ontoggle: function (e) { state.board.howOpen = e.target.open; } }, [
-        el("summary", { text: "How to earn points" }),
+        el("summary", { text: t("How to earn points") }),
         el("ul", null, [
-          el("li", { text: "1 point for each correct quiz answer (your best try at each quiz counts)" }),
-          el("li", { text: "2 points for each Word of the day you practise, today's or one from the past week" }),
-          el("li", { text: "10 points for joining the live class" })
+          el("li", { text: t("1 point for each correct quiz answer (your best try at each quiz counts)") }),
+          el("li", { text: t("2 points for each Word of the day you practise, today's or one from the past week") }),
+          el("li", { text: t("10 points for joining the live class") })
         ]),
-        el("p", { text: "Weeks run from Sunday to Saturday, and everyone starts the new week at zero." })
+        el("p", { text: t("Weeks run from Sunday to Saturday, and everyone starts the new week at zero.") })
       ])
     ]);
   }
@@ -1092,9 +1198,9 @@
   // they came from (with a Google script from before the breakdown, just the total).
   function renderMyPoints(me, anyLeaders) {
     if (!me) return null;
-    if (!me.points) return anyLeaders ? el("p", { class: "champ-me", text: "You don't have any points yet this week." }) : null;
-    var total = "You have " + pointsText(me.points) + " this week.";
-    var hidden = me.hidden ? el("p", { class: "champ-hidden", text: "Your name is hidden from the board, so only you see your points." }) : null;
+    if (!me.points) return anyLeaders ? el("p", { class: "champ-me", text: t("You don't have any points yet this week.") }) : null;
+    var total = t("You have {points} this week.", { points: pointsText(me.points) });
+    var hidden = me.hidden ? el("p", { class: "champ-hidden", text: t("Your name is hidden from the board, so only you see your points.") }) : null;
     if (!me.parts) return el("div", null, [el("p", { class: "champ-me", text: total }), hidden]);
     return el("div", null, [
       el("details", { class: "champ-me-more", open: state.board.meOpen, ontoggle: function (e) { state.board.meOpen = e.target.open; } }, [
@@ -1107,7 +1213,7 @@
 
   function renderPointParts(parts) {
     function count(n, one, many) {
-      return n ? " (" + n + " " + (n === 1 ? one : many) + ")" : "";
+      return n ? " (" + t(n === 1 ? one : many, { n: n }) + ")" : "";
     }
     function row(label, points) {
       return el("li", null, [
@@ -1115,10 +1221,10 @@
         el("span", { class: "champ-parts-points", text: pointsText(points) })
       ]);
     }
-    return el("ul", { class: "champ-parts", "aria-label": "Your points this week" }, [
-      row("Quizzes" + count(parts.quizzes, "quiz", "quizzes"), parts.quizPoints || 0),
-      row("Word of the day" + count(parts.days, "word", "words"), parts.practicePoints || 0),
-      row("Live class" + count(parts.classes, "class", "classes"), parts.classPoints || 0)
+    return el("ul", { class: "champ-parts", "aria-label": t("Your points this week") }, [
+      row(t("Quizzes") + count(parts.quizzes, "{n} quiz", "{n} quizzes"), parts.quizPoints || 0),
+      row(t("Word of the day") + count(parts.days, "{n} word", "{n} words"), parts.practicePoints || 0),
+      row(t("Live class") + count(parts.classes, "{n} class", "{n} classes"), parts.classPoints || 0)
     ]);
   }
 
@@ -1132,28 +1238,28 @@
 
   function renderShare() {
     var url = config.siteUrl || location.href.split("#")[0];
-    var message = SHARE_TEXT + " " + url;
+    var message = t(SHARE_TEXT) + " " + url;
     var status = el("span", { class: "share-status", role: "status" });
     function copyLink() {
-      function failed() { status.textContent = "Couldn't copy it. Select the link above and copy it."; }
+      function failed() { status.textContent = t("Couldn't copy it. Select the link above and copy it."); }
       if (!navigator.clipboard || !navigator.clipboard.writeText) return failed();
-      navigator.clipboard.writeText(url).then(function () { status.textContent = "Link copied."; }, failed);
+      navigator.clipboard.writeText(url).then(function () { status.textContent = t("Link copied."); }, failed);
     }
     return el("section", { class: "no-print" }, [
-      el("h1", { text: "Share Hebrew Class" }),
-      el("p", { class: "lede", text: "Send the link to a classmate or a friend." }),
+      el("h1", { text: t("Share Hebrew Class") }),
+      el("p", { class: "lede", text: t("Send the link to a classmate or a friend.") }),
       el("div", { class: "card share-card" }, [
         el("p", { class: "share-link", text: url }),
         el("div", { class: "actions" }, [
           // The phone's own share sheet (WhatsApp, Messages, …). Only on touch
           // screens: on a computer it opens Windows' share window, which the
           // buttons beside it already cover.
-          navigator.share && touchScreen() ? el("button", { class: "btn primary", type: "button", text: "Share…", onclick: function () {
-            navigator.share({ title: "Hebrew Class", text: SHARE_TEXT, url: url }).catch(function () { /* closed without sharing */ });
+          navigator.share && touchScreen() ? el("button", { class: "btn primary", type: "button", text: t("Share…"), onclick: function () {
+            navigator.share({ title: t("Hebrew Class"), text: t(SHARE_TEXT), url: url }).catch(function () { /* closed without sharing */ });
           } }) : null,
-          el("a", { class: "btn", href: "https://wa.me/?text=" + encodeURIComponent(message), target: "_blank", rel: "noopener", text: "WhatsApp" }),
-          el("a", { class: "btn", href: "mailto:?subject=" + encodeURIComponent("Hebrew Class") + "&body=" + encodeURIComponent(message), text: "Email" }),
-          el("button", { class: "btn", type: "button", text: "Copy link", onclick: copyLink })
+          el("a", { class: "btn", href: "https://wa.me/?text=" + encodeURIComponent(message), target: "_blank", rel: "noopener", text: t("WhatsApp") }),
+          el("a", { class: "btn", href: "mailto:?subject=" + encodeURIComponent(t("Hebrew Class")) + "&body=" + encodeURIComponent(message), text: t("Email") }),
+          el("button", { class: "btn", type: "button", text: t("Copy link"), onclick: copyLink })
         ]),
         status
       ])
@@ -1162,9 +1268,9 @@
 
   function renderNotFound() {
     return el("section", null, [
-      el("a", { class: "back", href: "#/", text: "← All lessons" }),
-      el("h1", { text: "Lesson not found" }),
-      el("p", { class: "lede", text: "This link may be out of date. Pick a lesson from the list." })
+      el("a", { class: "back", href: "#/", text: t("← All lessons") }),
+      el("h1", { text: t("Lesson not found") }),
+      el("p", { class: "lede", text: t("This link may be out of date. Pick a lesson from the list.") })
     ]);
   }
 
@@ -1180,9 +1286,9 @@
     // the lesson chosen from their lists.
     var named = tab === "quiz" || tab === "cards";
     var quietTitle = study || (tab === "live" && !isLiveTeacher() && !liveHere(lesson));
-    var title = el("h1", { class: named ? "study-lesson" : quietTitle ? "visually-hidden" : null, text: lesson.name });
+    var title = el("h1", { class: named ? "study-lesson" : quietTitle ? "visually-hidden" : null, text: lessonName(lesson) });
     var head = el("div", { class: "lesson-head no-print" }, [
-      tab === "sheet" ? el("a", { class: "back", href: "#/", text: "← All lessons" }) : null,
+      tab === "sheet" ? el("a", { class: "back", href: "#/", text: t("← All lessons") }) : null,
       named ? null : title
     ]);
     var body = tab === "quiz" ? renderQuiz(lesson)
@@ -1200,15 +1306,15 @@
     function item(key, href, text) {
       return el("a", { class: "subtab" + (active === key ? " active" : ""), href: href, "aria-current": active === key ? "page" : null, text: text });
     }
-    var quiz = lesson ? lessonPicker("quiz", "Quiz", active, lesson) : {};
-    var cards = lesson ? lessonPicker("cards", "Word by word", active, lesson) : {};
-    return el("nav", { class: "subtabs no-print", "aria-label": "Self study" }, [
+    var quiz = lesson ? lessonPicker("quiz", t("Quiz"), active, lesson) : {};
+    var cards = lesson ? lessonPicker("cards", t("Word by word"), active, lesson) : {};
+    return el("nav", { class: "subtabs no-print", "aria-label": t("Self study") }, [
       quiz.button,
       cards.button,
-      item("word", "#/study/word", "Word of the day"),
-      item("say", "#/study/say", "How to say"),
-      lesson ? item("resources", lessonUrl(lesson, "resources"), "Resources") : null,
-      item("suggestions", "#/suggestions", "Suggestions"),
+      item("word", "#/study/word", t("Word of the day")),
+      item("say", "#/study/say", t("How to say")),
+      lesson ? item("resources", lessonUrl(lesson, "resources"), t("Resources")) : null,
+      item("suggestions", "#/suggestions", t("Suggestions")),
       quiz.menu, // the lesson lists open below all the buttons
       cards.menu
     ]);
@@ -1221,7 +1327,7 @@
     var id = "lesson-menu-" + tab;
     var open = openLessonMenu === tab;
     var menu = el("div", { class: "lesson-menu", id: id, hidden: !open }, [
-      el("p", { class: "lesson-menu-title", text: "Choose a lesson" }),
+      el("p", { class: "lesson-menu-title", text: t("Choose a lesson") }),
       el("ul", null, lessons.map(function (lesson, i) {
         var here = lesson === current;
         return el("li", null, [
@@ -1232,8 +1338,8 @@
             onclick: closeLessonMenus // needed when it's the page already open: the address doesn't change
           }, [
             el("span", { class: "lesson-menu-text" }, [
-              el("span", { class: "lesson-menu-number", text: "Lesson " + lesson.number + (i === 0 ? " · Latest" : "") }),
-              el("span", { class: "lesson-menu-name", text: lesson.title })
+              el("span", { class: "lesson-menu-number", text: t("Lesson {n}", { n: lesson.number }) + (i === 0 ? " · " + t("Latest") : "") }),
+              el("span", { class: "lesson-menu-name", text: localText(lesson, "title") })
             ]),
             here ? el("span", { class: "lesson-menu-check", "aria-hidden": "true", text: "✓" }) : null
           ])
@@ -1287,27 +1393,27 @@
       items.push(el("a", { class: "resource", href: lesson.video, target: "_blank", rel: "noopener" }, [
         el("span", { class: "resource-icon", "aria-hidden": "true", text: "▶" }),
         el("span", { class: "resource-text" }, [
-          el("span", { class: "resource-kind", text: "Video" }),
+          el("span", { class: "resource-kind", text: t("Video") }),
           el("span", { class: "resource-title", text: lesson.videoTitle || lesson.video }),
-          el("span", { class: "resource-meta", text: "Opens in a new tab" })
+          el("span", { class: "resource-meta", text: t("Opens in a new tab") })
         ])
       ]));
     }
     return el("div", { class: "resources" }, [
-      el("h2", { text: "Resources", style: "margin-top:0" }),
+      el("h2", { text: t("Resources"), style: "margin-top:0" }),
       items.length
         ? el("div", { class: "resource-list" }, items)
-        : el("p", { class: "notice", text: "No resources for this lesson yet." })
+        : el("p", { class: "notice", text: t("No resources for this lesson yet.") })
     ]);
   }
 
   function niqqudToggle() {
-    return settingToggle("Show vowel marks (niqqud)", "niqqud", "hebrewClass.niqqud");
+    return settingToggle(t("Show vowel marks (niqqud)"), "niqqud", "hebrewClass.niqqud");
   }
 
   // Shown where answers are picked (the quiz and the Word of the day check).
   function trToggle() {
-    return settingToggle("Show transliteration", "showTr", "hebrewClass.transliteration");
+    return settingToggle(t("Show transliteration"), "showTr", "hebrewClass.transliteration");
   }
 
   // A checkbox for a state flag that this browser remembers.
@@ -1331,9 +1437,9 @@
   function renderSheetTab(lesson) {
     var toolbar = el("div", { class: "toolbar no-print" }, [
       niqqudToggle(),
-      el("button", { class: "btn primary", type: "button", onclick: function () { window.print(); }, text: "Print or save as PDF" })
+      el("button", { class: "btn primary", type: "button", onclick: function () { window.print(); }, text: t("Print or save as PDF") })
     ]);
-    var hint = el("p", { class: "hint no-print", text: "To download the sheet, press Print and choose “Save as PDF” as the printer." });
+    var hint = el("p", { class: "hint no-print", text: t("To download the sheet, press Print and choose “Save as PDF” as the printer.") });
     // fitSheet fills this with one or more pages once it is on screen.
     var pages = el("div", { class: "sheet-pages", id: "sheet-pages" });
     pages.lesson = lesson;
@@ -1346,16 +1452,17 @@
     lesson.sections.slice(from, to).forEach(function (section, i) {
       var si = from + i;
       tbody.appendChild(el("tr", { class: "section" }, [
-        el("td", { colspan: "3", text: (si + 1) + ". " + section.title })
+        el("td", { colspan: "3", text: (si + 1) + ". " + localText(section, "title") })
       ]));
-      if (section.explanation) {
+      var explanation = localText(section, "explanation");
+      if (explanation) {
         tbody.appendChild(el("tr", { class: "explain" }, [
-          el("td", { colspan: "3", text: heb(section.explanation) })
+          el("td", { colspan: "3", text: heb(explanation) })
         ]));
       }
       section.rows.forEach(function (row) {
         tbody.appendChild(el("tr", null, [
-          el("td", { text: row.en }),
+          el("td", { text: meaning(row) }),
           el("td", { class: "tr" }, formSpans(row, function (f) {
             return f.tr + (f.g ? " (" + f.g + ")" : "");
           })),
@@ -1376,25 +1483,25 @@
         el("col", { style: "width:29%" })
       ]),
       el("thead", null, [el("tr", null, [
-        el("th", { text: "English" }),
-        el("th", { text: "Transliteration" }),
-        el("th", { class: "he" }, ["Hebrew ", el("span", { lang: "he", dir: "rtl", text: heb("עִבְרִית") })])
+        el("th", { text: t("English") }),
+        el("th", { text: t("Transliteration") }),
+        el("th", { class: "he" }, [t("Hebrew") + " ", el("span", { lang: "he", dir: "rtl", text: heb("עִבְרִית") })])
       ])]),
       tbody
     ]);
 
     var first = pageNo === 1;
     var last = pageNo === pageCount;
-    var pageLabel = pageCount > 1 ? "Page " + pageNo + " of " + pageCount : "";
+    var pageLabel = pageCount > 1 ? t("Page {n} of {count}", { n: pageNo, count: pageCount }) : "";
     return el("div", { class: "sheet" }, [
-      first ? el("h2", { class: "sheet-title", text: lesson.title }) : null,
+      first ? el("h2", { class: "sheet-title", text: localText(lesson, "title") }) : null,
       el("p", { class: "sheet-subtitle", text: (first
-        ? [lesson.subtitle, pageLabel]
-        : [lesson.title, pageLabel]).filter(Boolean).join(" · ") }),
+        ? [localText(lesson, "subtitle"), pageLabel]
+        : [localText(lesson, "title"), pageLabel]).filter(Boolean).join(" · ") }),
       table,
-      last && lesson.notes ? el("p", { class: "sheet-notes" }, [el("strong", { text: "Notes: " }), lesson.notes]) : null,
+      last && lesson.notes ? el("p", { class: "sheet-notes" }, [el("strong", { text: t("Notes: ") }), localText(lesson, "notes")]) : null,
       last && lesson.video ? el("p", { class: "sheet-notes" }, [
-        el("strong", { text: "Video: " }),
+        el("strong", { text: t("Video: ") }),
         // The address stays visible so it still works on paper; in a saved PDF it is clickable.
         el("a", { href: lesson.video, target: "_blank", rel: "noopener", text: (lesson.videoTitle ? lesson.videoTitle + " – " : "") + lesson.video })
       ]) : null
@@ -1409,7 +1516,7 @@
       if (i > 0) nodes.push(el("span", { class: "sep", text: " · " }));
       nodes.push(el("span", {
         class: "form" + (speakable ? " speakable" : ""),
-        title: speakable ? "Click to listen" : null,
+        title: speakable ? t("Click to listen") : null,
         onclick: speakable ? function () { speak(f.he); } : null,
         text: textOf(f)
       }));
@@ -1510,9 +1617,9 @@
   }
 
   function genderLabel(row, g) {
-    var toSomeone = /\(to m\/f\)/.test(row.en);
-    if (g === "m") return toSomeone ? "To a man" : "Male";
-    return toSomeone ? "To a woman" : "Female";
+    var toSomeone = TO_MARK.test(row.en);
+    if (g === "m") return t(toSomeone ? "To a man" : "Male");
+    return t(toSomeone ? "To a woman" : "Female");
   }
 
   function renderCards(lesson) {
@@ -1520,7 +1627,7 @@
     if (!state.cards) state.cards = { lessonId: lesson.id, index: 0 };
     var c = state.cards;
     c.count = list.length;
-    if (!list.length) return el("p", { class: "notice", text: "This lesson has no phrases yet." });
+    if (!list.length) return el("p", { class: "notice", text: t("This lesson has no phrases yet.") });
     if (c.index >= list.length) c.index = list.length - 1;
     var first = c.index === 0;
     var last = c.index === list.length - 1;
@@ -1529,11 +1636,11 @@
 
     var pct = Math.round(((c.index + 1) / list.length) * 100);
     var nav = el("div", { class: "card-nav" }, [
-      el("button", { class: "btn", type: "button", disabled: first, onclick: function () { moveCard(-1); }, text: "← Previous" }),
+      el("button", { class: "btn", type: "button", disabled: first, onclick: function () { moveCard(-1); }, text: t("← Previous") }),
       el("span", { class: "card-count", "aria-live": "polite", text: (c.index + 1) + " / " + list.length }),
       last
-        ? el("button", { class: "btn primary", type: "button", onclick: function () { c.index = 0; render(); }, text: "Start over" })
-        : el("button", { class: "btn primary", type: "button", onclick: function () { moveCard(1); }, text: "Next word →" })
+        ? el("button", { class: "btn primary", type: "button", onclick: function () { c.index = 0; render(); }, text: t("Start over") })
+        : el("button", { class: "btn primary", type: "button", onclick: function () { moveCard(1); }, text: t("Next word →") })
     ]);
 
     return el("div", { class: "cards-view" }, [
@@ -1542,7 +1649,7 @@
       card,
       nav,
       sectionExplanation(list[c.index]),
-      el("p", { class: "hint card-hint", text: "Tip: use the ← → arrow keys to move between words." })
+      el("p", { class: "hint card-hint", text: t("Tip: use the ← → arrow keys to move between words.") })
     ]);
   }
 
@@ -1550,7 +1657,7 @@
   // (both forms when there are two) with transliteration.
   function wordCard(item) {
     return el("div", { class: "card word-card" }, [
-      el("p", { class: "card-section", text: item.sectionNo + ". " + item.section.title }),
+      el("p", { class: "card-section", text: item.sectionNo + ". " + localText(item.section, "title") }),
       cardBody(item.row)
     ]);
   }
@@ -1558,7 +1665,8 @@
   // The section's explanation goes under the buttons, so on a phone the word
   // and Next are on screen without scrolling.
   function sectionExplanation(item) {
-    return item.section.explanation ? el("p", { class: "card-explain", text: heb(item.section.explanation) }) : null;
+    var text = localText(item.section, "explanation");
+    return text ? el("p", { class: "card-explain", text: heb(text) }) : null;
   }
 
   // English, then each Hebrew form with its transliteration and a listen button.
@@ -1572,7 +1680,7 @@
       ]);
     });
 
-    var en = row.en.replace(/\s*\((to )?m\/f\)/, "");
+    var en = meaning(row).replace(TO_MARK, "").replace(MF_MARK, "");
     // Whole sentences get smaller type on a phone, so Next still fits on screen.
     var long = en.length > 30 || row.forms.some(function (f) { return plain(f.he).length > 24; });
     return el("div", { class: "card-body" + (long ? " long" : "") }, [
@@ -1733,24 +1841,25 @@
 
   function renderQuizPicker(lesson) {
     var plan = quizPlan(lesson);
-    if (!plan.length) return el("p", { class: "notice", text: "This lesson has no phrases yet." });
+    if (!plan.length) return el("p", { class: "notice", text: t("This lesson has no phrases yet.") });
     var best = quizBests(lesson);
     var saving = !!config.resultsUrl && !!state.student;
     var top = null;
     Object.keys(best).forEach(function (n) {
       if (!top || best[n].score / best[n].total > top.score / top.total) top = best[n];
     });
-    var intro = (plan.length === 1 ? "One short quiz" : plan.length + " short quizzes, each on different phrases")
-      + ": multiple choice, then a matching round that counts as one question. Take them in any order, as often as you like."
-      + (saving ? " Your highest score is the one that counts for this lesson." : "");
+    var intro = t(plan.length === 1
+      ? "One short quiz: multiple choice, then a matching round that counts as one question. Take it as often as you like."
+      : "{n} short quizzes, each on different phrases: multiple choice, then a matching round that counts as one question. Take them in any order, as often as you like.", { n: plan.length })
+      + (saving ? " " + t("Your highest score is the one that counts for this lesson.") : "");
     return el("div", { class: "card" }, [
-      el("h2", { text: "Choose a quiz", style: "margin-top:0" }), // the lesson's name is above, under the buttons
+      el("h2", { text: t("Choose a quiz"), style: "margin-top:0" }), // the lesson's name is above, under the buttons
       el("p", { text: intro }),
       top ? el("p", { class: "quiz-best" }, [
-        "Your highest score for this lesson: ",
+        t("Your highest score for this lesson:") + " ",
         el("strong", { class: "score-pill " + scoreClass(top.score, top.total), text: top.score + " / " + top.total })
       ]) : null,
-      state.student ? null : el("p", { class: "hint", text: "You're signed in as the teacher, so your scores won't be saved." }),
+      state.student ? null : el("p", { class: "hint", text: t("You're signed in as the teacher, so your scores won't be saved.") }),
       el("div", { class: "quiz-picks" }, plan.map(function (part, i) {
         var number = i + 1;
         var mine = best[number];
@@ -1759,11 +1868,11 @@
           type: "button",
           onclick: function () { state.quiz = buildQuiz(lesson, number); render(); }
         }, [
-          el("span", { class: "quiz-pick-name", text: "Quiz " + number }),
-          el("span", { class: "quiz-pick-meta", text: (part.choice.length + (part.match.length ? 1 : 0)) + " questions" }),
+          el("span", { class: "quiz-pick-name", text: t("Quiz {n}", { n: number }) }),
+          el("span", { class: "quiz-pick-meta", text: t("{n} questions", { n: part.choice.length + (part.match.length ? 1 : 0) }) }),
           mine
-            ? el("span", { class: "score-pill " + scoreClass(mine.score, mine.total), text: "Best " + mine.score + " / " + mine.total })
-            : el("span", { class: "quiz-pick-meta", text: "Not taken yet" })
+            ? el("span", { class: "score-pill " + scoreClass(mine.score, mine.total), text: t("Best {score}", { score: mine.score + " / " + mine.total }) })
+            : el("span", { class: "quiz-pick-meta", text: t("Not taken yet") })
         ]);
       }))
     ]);
@@ -1772,7 +1881,7 @@
   function renderProgress(quiz) {
     var pct = Math.round((quiz.index / quiz.items.length) * 100);
     return [
-      el("p", { class: "quiz-progress", text: "Quiz " + quiz.number + " · Question " + (quiz.index + 1) + " of " + quiz.items.length + " · Score " + quiz.score }),
+      el("p", { class: "quiz-progress", text: t("Quiz {n} · Question {q} of {count} · Score {score}", { n: quiz.number, q: quiz.index + 1, count: quiz.items.length, score: quiz.score }) }),
       el("div", { class: "progress-bar", "aria-hidden": "true" }, [el("span", { style: "width:" + pct + "%" })])
     ];
   }
@@ -1807,7 +1916,7 @@
     if (answered) {
       var right = item.picked === item.form;
       children.push(el("p", { class: "feedback " + (right ? "good" : "bad") }, [
-        right ? "Correct! " : "Not quite. The answer is ",
+        right ? t("Correct!") + " " : t("Not quite. The answer is") + " ",
         right ? null : el("span", { lang: "he", dir: "rtl", text: heb(item.form.he) }),
         right ? null : " ",
         el("span", { class: "tr", text: "(" + item.form.tr + ")" }),
@@ -1868,13 +1977,13 @@
       }, heWithTr(round.pairs[i].form));
     }));
     var children = renderProgress(quiz).concat([
-      el("p", { class: "prompt", text: "Match each English phrase to its Hebrew." }),
-      el("p", { class: "hint", style: "margin-top:-12px", text: "This round is one question: match them all without a wrong pairing to get the point." }),
+      el("p", { class: "prompt", text: t("Match each English phrase to its Hebrew.") }),
+      el("p", { class: "hint", style: "margin-top:-12px", text: t("This round is one question: match them all without a wrong pairing to get the point.") }),
       el("div", { class: "match-grid" }, [enCol, heCol])
     ]);
     if (done) {
       var clean = round.pairs.every(function (p) { return !p.wrong; });
-      children.push(el("p", { class: "feedback " + (clean ? "good" : "bad"), text: clean ? "All matched, with no mistakes!" : "All matched, but with a wrong pairing on the way, so no point this time." }));
+      children.push(el("p", { class: "feedback " + (clean ? "good" : "bad"), text: clean ? t("All matched, with no mistakes!") : t("All matched, but with a wrong pairing on the way, so no point this time.") }));
       children.push(nextButton(quiz));
     }
     return el("div", { class: "card" }, children);
@@ -1912,7 +2021,7 @@
       el("button", {
         class: "btn primary",
         type: "button",
-        text: last ? "See my score" : "Next",
+        text: last ? t("See my score") : t("Next"),
         onclick: function () {
           if (last) finishQuiz(quiz);
           else quiz.index++;
@@ -1939,7 +2048,7 @@
       quiz: quiz.number,
       score: quiz.score,
       total: quiz.total,
-      missed: quiz.missed.map(function (f) { return promptFor(f) + " = " + plain(f.he); }).join("; "),
+      missed: quiz.missed.map(function (f) { return promptFor(f, "en") + " = " + plain(f.he); }).join("; "),
       finishedAt: new Date().toISOString()
     };
     callBackend(payload).then(function (res) {
@@ -1954,15 +2063,15 @@
 
   function renderQuizResults(lesson, quiz) {
     var pct = quiz.total ? Math.round((quiz.score / quiz.total) * 100) : 0;
-    var message = pct === 100 ? "Perfect! מְצוּיָן" : pct >= 80 ? "Great work!" : pct >= 50 ? "Good effort. Review the phrases below and try again." : "Keep practising with the lesson sheet, then try again.";
+    var message = pct === 100 ? t("Perfect! מְצוּיָן") : pct >= 80 ? t("Great work!") : pct >= 50 ? t("Good effort. Review the phrases below and try again.") : t("Keep practising with the lesson sheet, then try again.");
     var children = [
-      el("p", { class: "quiz-progress", text: "Quiz " + quiz.number + " · Your score" }),
+      el("p", { class: "quiz-progress", text: t("Quiz {n} · Your score", { n: quiz.number }) }),
       el("p", { class: "score", text: quiz.score + " / " + quiz.total }),
       el("p", { text: message })
     ];
     if (quiz.missed.length) {
       children.push(el("div", { class: "missed" }, [
-        el("h3", { text: "Phrases to review" }),
+        el("h3", { text: t("Phrases to review") }),
         el("ul", null, quiz.missed.map(function (f) {
           return el("li", null, [
             el("strong", { text: promptFor(f) }),
@@ -1976,9 +2085,9 @@
     }
     if (quiz.sendStatus) {
       var statusText = {
-        sending: "Saving your score…",
-        sent: "Your score was saved in your progress report.",
-        failed: "Your score could not be saved. Check your connection and take the quiz again, or tell your teacher."
+        sending: t("Saving your score…"),
+        sent: t("Your score was saved in your progress report."),
+        failed: t("Your score could not be saved. Check your connection and take the quiz again, or tell your teacher.")
       }[quiz.sendStatus];
       children.push(el("p", { class: "send-status" + (quiz.sendStatus === "failed" ? " bad" : ""), text: statusText }));
     }
@@ -1986,16 +2095,16 @@
       el("button", {
         class: "btn primary",
         type: "button",
-        text: quizPlan(lesson).length > 1 ? "Choose another quiz" : "Done",
+        text: quizPlan(lesson).length > 1 ? t("Choose another quiz") : t("Done"),
         onclick: function () { state.quiz = null; render(); }
       }),
       el("button", {
         class: "btn",
         type: "button",
-        text: "Try this one again",
+        text: t("Try this one again"),
         onclick: function () { state.quiz = buildQuiz(lesson, quiz.number); render(); }
       }),
-      el("a", { class: "btn", href: lessonUrl(lesson, "sheet"), text: "Back to the lesson sheet" })
+      el("a", { class: "btn", href: lessonUrl(lesson, "sheet"), text: t("Back to the lesson sheet") })
     ]));
     return el("div", { class: "card" }, children);
   }
@@ -2009,10 +2118,10 @@
   // "bad-request" to anything it doesn't know.
   function backendMessage(res, fallback) {
     var error = res && res.error;
-    if (error === "bad-request") return NOT_SWITCHED_ON;
-    if (error === "sign-in") return "This name is protected by a PIN. Sign out, then sign in again with the PIN.";
-    if (error === "wrong-passcode") return "The teacher passcode didn't work. Sign out and sign in again.";
-    return fallback;
+    if (error === "bad-request") return t(NOT_SWITCHED_ON);
+    if (error === "sign-in") return t("This name is protected by a PIN. Sign out, then sign in again with the PIN.");
+    if (error === "wrong-passcode") return t("The teacher passcode didn't work. Sign out and sign in again.");
+    return t(fallback);
   }
 
   function pad2(n) {
@@ -2046,7 +2155,7 @@
   var dailyWords = null;
 
   HC.setDailyWords = function (sections) {
-    dailyWords = normalizeLesson({ id: "daily-words", title: "Word of the day", sections: sections });
+    dailyWords = normalizeLesson({ id: "daily-words", title: t("Word of the day"), sections: sections });
     seededShuffle(dailyWords.order = cardList(dailyWords), hashText("daily-words"));
   };
 
@@ -2086,7 +2195,7 @@
     var tab = state.route.tab;
     return el("section", null, [
       // No visible title: the menu sits at the top, so the word fits on a phone.
-      el("h1", { class: "visually-hidden", text: "Self study" }),
+      el("h1", { class: "visually-hidden", text: t("Self study") }),
       studyNav(tab, null),
       tab === "say" ? renderSay() : renderWordOfDay()
     ]);
@@ -2129,7 +2238,7 @@
       };
     }
     var w = state.wotd;
-    if (!w) return el("p", { class: "notice", text: "There is no word of the day yet." });
+    if (!w) return el("p", { class: "notice", text: t("There is no word of the day yet.") });
     // The word's own page always shows its transliteration; the checkbox is for the check.
     var toolbar = el("div", { class: "toolbar study-toolbar no-print" }, [niqqudToggle(), w.step === "ask" ? trToggle() : null]);
     return el("div", { class: "cards-view" }, w.step === "ask" ? [toolbar, renderWordCheck(w)] : [
@@ -2142,12 +2251,12 @@
   // Today's word and the past week's: a student who missed a day can catch up.
   function renderWordDays(days, chosen) {
     return el("div", { class: "wotd-days no-print" }, [
-      el("p", { class: "wotd-days-title", id: "wotd-days-title", text: "Catch up on the past week's words" }),
+      el("p", { class: "wotd-days-title", id: "wotd-days-title", text: t("Catch up on the past week's words") }),
       el("div", { class: "wotd-day-list", role: "group", "aria-labelledby": "wotd-days-title" }, days.map(function (day, i) {
         var done = practisedWord(day);
         var date = parseDay(day);
-        var label = i === 0 ? "Today" : i === 1 ? "Yesterday"
-          : date.toLocaleDateString(undefined, { weekday: "short" }) + " " + date.getDate(); // "Sun 15"
+        var label = i === 0 ? t("Today") : i === 1 ? t("Yesterday")
+          : date.toLocaleDateString(dateLocale(), { weekday: "short" }) + " " + date.getDate(); // "Sun 15"
         return el("button", {
           type: "button",
           class: "subtab wotd-day" + (day === chosen ? " active" : ""),
@@ -2161,7 +2270,7 @@
         }, [
           label,
           done ? el("span", { class: "wotd-day-done", "aria-hidden": "true", text: "✓" }) : null,
-          done ? el("span", { class: "visually-hidden", text: ", practised" }) : null
+          done ? el("span", { class: "visually-hidden", text: t(", practised") }) : null
         ]);
       }))
     ]);
@@ -2170,25 +2279,25 @@
   function renderWordLearn(w, isToday) {
     var done = practisedWord(w.day);
     var savedText = {
-      saving: "Saving…",
-      saved: "Saved in your progress report.",
-      failed: "Couldn't save this in your progress report. Check your connection and practise again.",
-      off: NOT_SWITCHED_ON,
+      saving: t("Saving…"),
+      saved: t("Saved in your progress report."),
+      failed: t("Couldn't save this in your progress report. Check your connection and practise again."),
+      off: t(NOT_SWITCHED_ON),
       pin: backendMessage({ error: "sign-in" })
     }[w.saved];
     return el("div", null, [
       el("div", { class: "card word-card wotd-card" }, [
-        el("p", { class: "card-section", text: "Word of the day · " + formatDate(w.day) }),
+        el("p", { class: "card-section", text: t("Word of the day") + " · " + formatDate(w.day) }),
         cardBody(w.row)
       ]),
-      done ? el("p", { class: "notice good", role: "status", text: isToday ? "Practised today. Come back tomorrow for a new word." : "You've practised this word." }) : null,
+      done ? el("p", { class: "notice good", role: "status", text: isToday ? t("Practised today. Come back tomorrow for a new word.") : t("You've practised this word.") }) : null,
       savedText ? el("p", { class: "send-status" + (w.saved === "saving" || w.saved === "saved" ? "" : " bad"), text: savedText }) : null,
-      !state.student ? el("p", { class: "hint", text: "You're signed in as the teacher, so your practice isn't recorded." }) : null,
+      !state.student ? el("p", { class: "hint", text: t("You're signed in as the teacher, so your practice isn't recorded.") }) : null,
       el("div", { class: "actions wotd-actions" }, [
         el("button", {
           class: "btn" + (done ? "" : " primary"),
           type: "button",
-          text: done ? "Practise again" : "Practise this word",
+          text: done ? t("Practise again") : t("Practise this word"),
           onclick: function () {
             w.step = "ask";
             w.picked = null;
@@ -2219,12 +2328,12 @@
       ]);
     }));
     return el("div", { class: "card" }, [
-      el("p", { class: "quiz-progress", text: "Word of the day · Which one is it?" }),
+      el("p", { class: "quiz-progress", text: t("Word of the day · Which one is it?") }),
       el("p", { class: "prompt", text: promptFor(w.form) }),
       options,
-      wrong ? el("p", { class: "feedback bad", role: "status", text: "Not quite. Look at the word again, then try once more." }) : null,
+      wrong ? el("p", { class: "feedback bad", role: "status", text: t("Not quite. Look at the word again, then try once more.") }) : null,
       wrong ? el("div", { class: "actions" }, [
-        el("button", { class: "btn primary", type: "button", text: "Back", onclick: function () { w.step = "learn"; render(); } })
+        el("button", { class: "btn primary", type: "button", text: t("Back"), onclick: function () { w.step = "learn"; render(); } })
       ]) : null
     ]);
   }
@@ -2265,14 +2374,14 @@
 
   function renderSay() {
     var say = state.say;
-    if (!config.resultsUrl) return el("p", { class: "notice", text: NOT_CONNECTED });
+    if (!config.resultsUrl) return el("p", { class: "notice", text: t(NOT_CONNECTED) });
     var input = el("input", {
       type: "text",
       id: "say-text",
       required: true,
       maxlength: String(SAY_MAX),
       autocomplete: "off",
-      placeholder: "For example: Where is the bus stop?",
+      placeholder: t("For example: Where is the bus stop?"),
       value: say.text,
       oninput: function (e) { say.text = e.target.value; }
     });
@@ -2284,15 +2393,15 @@
       }
     }, [
       el("div", { class: "field wide" }, [
-        el("label", { for: "say-text", text: "A word or short phrase in English" }),
+        el("label", { for: "say-text", text: t("A word or short phrase in English") }),
         // The microphone sits at the end of the box: say the phrase instead of typing it.
         el("div", { class: "say-input" + (Recognition ? " with-mic" : "") }, [input, Recognition ? micButton(say) : null])
       ]),
-      say.listening ? el("p", { class: "say-listening", role: "status", text: "Listening… say the phrase in English. Tap the microphone to stop." }) : null,
+      say.listening ? el("p", { class: "say-listening", role: "status", text: t("Listening… say the phrase in English. Tap the microphone to stop.") }) : null,
       el("div", { class: "actions" }, [
-        el("button", { class: "btn primary", type: "submit", disabled: say.busy, text: say.busy ? "Translating…" : "Translate to Hebrew" })
+        el("button", { class: "btn primary", type: "submit", disabled: say.busy, text: say.busy ? t("Translating…") : t("Translate to Hebrew") })
       ]),
-      Recognition ? null : el("p", { class: "hint", text: "To say the phrase instead of typing it, open the site in Chrome, Edge or Safari." }),
+      Recognition ? null : el("p", { class: "hint", text: t("To say the phrase instead of typing it, open the site in Chrome, Edge or Safari.") }),
       say.error ? el("p", { class: "notice error", role: "alert", text: say.error }) : null
     ]);
     var result = say.result ? el("div", { class: "card word-card say-result", "aria-live": "polite" }, [
@@ -2305,7 +2414,7 @@
     return el("div", { class: "cards-view" }, [
       form,
       result,
-      el("p", { class: "hint", text: "This is Google's automatic translation, without vowel marks. It may pick the male or the female form, and it can be wrong, so check with your teacher. What you type is sent to Google to be translated." })
+      el("p", { class: "hint", text: t("This is Google's automatic translation, without vowel marks. It may pick the male or the female form, and it can be wrong, so check with your teacher. What you type is sent to Google to be translated.") })
     ]);
   }
 
@@ -2314,8 +2423,8 @@
       class: "mic-btn" + (say.listening ? " listening" : ""),
       type: "button",
       disabled: say.busy,
-      title: say.listening ? "Stop listening" : "Say it instead",
-      "aria-label": say.listening ? "Stop listening" : "Say it instead of typing",
+      title: say.listening ? t("Stop listening") : t("Say it instead"),
+      "aria-label": say.listening ? t("Stop listening") : t("Say it instead of typing"),
       "aria-pressed": say.listening ? "true" : "false",
       onclick: function () { if (say.listening) stopListening(); else startListening(); }
     });
@@ -2331,8 +2440,12 @@
     say.busy = true;
     say.error = "";
     render();
-    callBackend({ action: "translate", text: text }).then(function (res) {
-      if (res && res.ok && res.hebrew) {
+    var from = uiLang; // the language the phrase is typed or said in
+    callBackend({ action: "translate", text: text, from: from }).then(function (res) {
+      if (res && res.ok && res.hebrew && from === "es" && res.from !== "es") {
+        // A Google script from before Spanish translates from English only.
+        say.error = t(NOT_SWITCHED_ON);
+      } else if (res && res.ok && res.hebrew) {
         say.result = { text: res.text || text, hebrew: res.hebrew };
         // The English stays on the result card; the box is ready for the next phrase.
         if (say.text === text) say.text = "";
@@ -2340,7 +2453,7 @@
         say.error = backendMessage(res, "Couldn't translate that. Try again in a moment.");
       }
     }, function () {
-      say.error = "Couldn't reach the translator. Check your connection and try again.";
+      say.error = t("Couldn't reach the translator. Check your connection and try again.");
     }).then(function () {
       say.busy = false;
       if (state.route.view === "study" && state.route.tab === "say") render();
@@ -2353,7 +2466,7 @@
     var heard = "";
     var rec = new Recognition();
     recognition = rec;
-    rec.lang = "en-US";
+    rec.lang = uiLang === "es" ? spanishSpeech() : "en-US";
     rec.interimResults = false;
     rec.maxAlternatives = 1;
     rec.onresult = function (e) {
@@ -2361,10 +2474,10 @@
     };
     rec.onerror = function (e) {
       say.error = e.error === "not-allowed" || e.error === "service-not-allowed"
-        ? "The microphone is blocked. Allow it for this site in your browser, or type the phrase."
-        : e.error === "no-speech" ? "Didn't hear anything. Try again, or type the phrase."
+        ? t("The microphone is blocked. Allow it for this site in your browser, or type the phrase.")
+        : e.error === "no-speech" ? t("Didn't hear anything. Try again, or type the phrase.")
         : e.error === "aborted" ? ""
-        : "Couldn't hear that. Try again, or type the phrase.";
+        : t("Couldn't hear that. Try again, or type the phrase.");
     };
     rec.onend = function () {
       if (recognition === rec) recognition = null;
@@ -2379,11 +2492,18 @@
     } catch (err) {
       say.listening = false;
       recognition = null;
-      say.error = "Couldn't start the microphone. Type the phrase instead.";
+      say.error = t("Couldn't start the microphone. Type the phrase instead.");
     }
     // A short phrase only: stop by itself after a few seconds.
     setTimeout(function () { if (recognition === rec) rec.stop(); }, LISTEN_MS);
     render();
+  }
+
+  // Spoken Spanish: the device's own kind (es-AR, es-ES…) if it is set to
+  // Spanish, otherwise Mexican Spanish, which Chrome, Edge and Safari all know.
+  function spanishSpeech() {
+    var device = navigator.language || "";
+    return /^es-/i.test(device) ? device : "es-MX";
   }
 
   function stopListening() {
@@ -2400,7 +2520,7 @@
       if (res && res.ok) { box.items = res.suggestions || []; box.error = ""; }
       else box.error = backendMessage(res, "Couldn't load the suggestions.");
     }, function () {
-      box.error = "Couldn't reach the suggestions box. Check your connection.";
+      box.error = t("Couldn't reach the suggestions box. Check your connection.");
     }).then(function () {
       box.loading = false;
       // The Teacher page shows the count on its next refresh, so nothing flickers.
@@ -2419,7 +2539,7 @@
       if (res && res.ok) { box.items = res.suggestions || []; box.draft = ""; }
       else box.sendError = backendMessage(res, "Couldn't send your suggestion. Try again.");
     }, function () {
-      box.sendError = "Couldn't send your suggestion. Check your connection and try again.";
+      box.sendError = t("Couldn't send your suggestion. Check your connection and try again.");
     }).then(function () {
       box.sending = false;
       if (state.route.view === "suggestions") render();
@@ -2435,7 +2555,7 @@
       if (res && res.ok) box.items = res.suggestions || [];
       else box.sendError = backendMessage(res, "Couldn't save your response. Try again.");
     }, function () {
-      box.sendError = "Couldn't save your response. Check your connection and try again.";
+      box.sendError = t("Couldn't save your response. Check your connection and try again.");
     }).then(function () {
       box.saving = "";
       if (state.route.view === "suggestions") render();
@@ -2447,11 +2567,11 @@
     // The Self study menu stays at the top, in the same place as on its other pages.
     var wrap = el("section", null, [
       studyNav("suggestions", null),
-      el("h1", { text: "Suggestions box" }),
-      el("p", { class: "lede", text: "Ideas to improve this site, or topics you'd like in a lesson. Everyone in the class can read the suggestions and the teacher's responses." })
+      el("h1", { text: t("Suggestions box") }),
+      el("p", { class: "lede", text: t("Ideas to improve this site, or topics you'd like in a lesson. Everyone in the class can read the suggestions and the teacher's responses.") })
     ]);
     if (!config.resultsUrl) {
-      wrap.appendChild(el("p", { class: "notice", text: NOT_CONNECTED }));
+      wrap.appendChild(el("p", { class: "notice", text: t(NOT_CONNECTED) }));
       return wrap;
     }
 
@@ -2465,19 +2585,19 @@
         if (text && !box.sending) sendSuggestion(text);
       }
     }, [
-      el("div", { class: "field wide" }, [el("label", { for: "suggestion-text", text: "Your suggestion" }), textarea]),
+      el("div", { class: "field wide" }, [el("label", { for: "suggestion-text", text: t("Your suggestion") }), textarea]),
       box.sendError ? el("p", { class: "notice error", role: "alert", text: box.sendError }) : null,
-      el("div", { class: "actions" }, [el("button", { class: "btn primary", type: "submit", disabled: box.sending, text: box.sending ? "Sending…" : "Submit" })])
+      el("div", { class: "actions" }, [el("button", { class: "btn primary", type: "submit", disabled: box.sending, text: box.sending ? t("Sending…") : t("Submit") })])
     ]));
 
-    wrap.appendChild(el("h2", { class: "list-title", text: "Suggestions so far" }));
+    wrap.appendChild(el("h2", { class: "list-title", text: t("Suggestions so far") }));
     if (box.error) wrap.appendChild(el("p", { class: "notice error", text: box.error }));
     if (!box.items) {
-      if (!box.error) wrap.appendChild(el("p", { class: "notice", text: "Loading the suggestions…" }));
+      if (!box.error) wrap.appendChild(el("p", { class: "notice", text: t("Loading the suggestions…") }));
       return wrap;
     }
     if (!box.items.length) {
-      wrap.appendChild(el("p", { class: "notice", text: "No suggestions yet. Yours can be the first." }));
+      wrap.appendChild(el("p", { class: "notice", text: t("No suggestions yet. Yours can be the first.") }));
       return wrap;
     }
     var newest = box.items.slice().sort(function (a, b) { return a.at < b.at ? 1 : -1; });
@@ -2505,19 +2625,19 @@
           if (!box.saving) sendResponse(item.id, textarea.value.trim());
         }
       }, [
-        el("div", { class: "field wide" }, [el("label", { for: id, text: "Your response" + (item.respondedAt ? " · " + formatTime(item.respondedAt) : "") }), textarea]),
-        el("button", { class: "btn", type: "submit", disabled: !!box.saving, text: box.saving === item.id ? "Saving…" : item.response ? "Update response" : "Save response" })
+        el("div", { class: "field wide" }, [el("label", { for: id, text: t("Your response") + (item.respondedAt ? " · " + formatTime(item.respondedAt) : "") }), textarea]),
+        el("button", { class: "btn", type: "submit", disabled: !!box.saving, text: box.saving === item.id ? t("Saving…") : item.response ? t("Update response") : t("Save response") })
       ]));
     } else if (item.response) {
       children.push(el("div", { class: "response" }, [
         el("p", { class: "suggestion-head" }, [
-          el("strong", { text: "Teacher's response" }),
+          el("strong", { text: t("Teacher's response") }),
           item.respondedAt ? el("span", { class: "muted", text: formatTime(item.respondedAt) }) : null
         ]),
         el("p", { class: "suggestion-text", text: item.response })
       ]));
     } else {
-      children.push(el("p", { class: "muted response-none", text: "No response yet." }));
+      children.push(el("p", { class: "muted response-none", text: t("No response yet.") }));
     }
     return el("li", { class: "card suggestion" }, children);
   }
@@ -2525,8 +2645,11 @@
   /* ---------- Progress reports ---------- */
 
   var WEEKS_SHOWN = 26;
-  var DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
-  var DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  var DAY_LETTERS = { en: ["S", "M", "T", "W", "T", "F", "S"], es: ["D", "L", "M", "X", "J", "V", "S"] };
+  var DAY_NAMES = {
+    en: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+    es: ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"]
+  };
 
   // Weeks run Sunday to Saturday.
   function weekStart(date) {
@@ -2535,7 +2658,7 @@
 
   function weekLabel(start) {
     var opts = { day: "numeric", month: "short" };
-    return start.toLocaleDateString(undefined, opts) + " – " + addDays(start, 6).toLocaleDateString(undefined, opts);
+    return start.toLocaleDateString(dateLocale(), opts) + " – " + addDays(start, 6).toLocaleDateString(dateLocale(), opts);
   }
 
   // One entry per week, newest first, from the first week with anything in it to this week.
@@ -2585,8 +2708,8 @@
 
   // Sunday to Saturday, filled where the word of the day was practised.
   function dayDots(days) {
-    return el("span", { class: "day-dots", role: "img", "aria-label": countDays(days) + " of 7 days practised" }, DAY_LETTERS.map(function (letter, i) {
-      return el("span", { class: "day-dot" + (days[i] ? " on" : ""), title: DAY_NAMES[i] + (days[i] ? ": practised" : ""), text: letter });
+    return el("span", { class: "day-dots", role: "img", "aria-label": t("{n} of 7 days practised", { n: countDays(days) }) }, DAY_LETTERS[uiLang].map(function (letter, i) {
+      return el("span", { class: "day-dot" + (days[i] ? " on" : ""), title: DAY_NAMES[uiLang][i] + (days[i] ? ": " + t("practised") : ""), text: letter });
     }));
   }
 
@@ -2624,6 +2747,22 @@
     return list;
   }
 
+  // Quiz misses are saved with the English, for the teacher; in Spanish the
+  // site shows the Spanish of the same phrase.
+  var formsByEnglish = null;
+
+  function missedMeaning(english) {
+    if (uiLang === "en") return english;
+    if (!formsByEnglish) {
+      formsByEnglish = {};
+      lessons.forEach(function (lesson) {
+        lesson.forms.forEach(function (f) { formsByEnglish[promptFor(f, "en")] = f; });
+      });
+    }
+    var form = formsByEnglish[english];
+    return form ? promptFor(form) : english;
+  }
+
   // perStudent: count how many students missed it, not how many times.
   function missedList(items, limit, perStudent) {
     var sorted = items.slice().sort(function (a, b) {
@@ -2633,9 +2772,9 @@
       var cut = m.text.lastIndexOf(" = ");
       var n = perStudent ? m.studentCount : m.count;
       return el("li", null, [
-        el("span", { class: "missed-en", text: cut === -1 ? m.text : m.text.slice(0, cut) }),
+        el("span", { class: "missed-en", text: cut === -1 ? m.text : missedMeaning(m.text.slice(0, cut)) }),
         cut === -1 ? null : el("span", { class: "missed-he", lang: "he", dir: "rtl", text: m.text.slice(cut + 3) }),
-        el("span", { class: "missed-count", text: perStudent ? (n === 1 ? "1 student" : n + " students") : (n === 1 ? "once" : n + " times") })
+        el("span", { class: "missed-count", text: perStudent ? t(n === 1 ? "1 student" : "{n} students", { n: n }) : t(n === 1 ? "once" : "{n} times", { n: n }) })
       ]);
     }));
   }
@@ -2650,8 +2789,8 @@
     var rows = ids.map(function (id) {
       var lesson = findLesson(id);
       var tries = byLesson[id] || [];
-      var name = el("th", { scope: "row", text: lesson ? lesson.name : tries[0].lessonTitle || id });
-      if (!tries.length) return el("tr", null, [name, el("td", { class: "empty", colspan: "3", text: "Not started" })]);
+      var name = el("th", { scope: "row", text: lesson ? lessonName(lesson) : tries[0].lessonTitle || id });
+      if (!tries.length) return el("tr", null, [name, el("td", { class: "empty", colspan: "3", text: t("Not started") })]);
       var best = bestScores(tries)[0];
       var tried = {};
       tries.forEach(function (r) { if (r.quiz) tried[r.quiz] = true; });
@@ -2661,17 +2800,17 @@
         name,
         el("td", null, [el("strong", { class: "score-pill " + scoreClass(best.score, best.total), text: best.score + " / " + best.total })]),
         // Results from before a lesson had several short quizzes carry no quiz number.
-        el("td", { text: (!countDays(tried) ? "Earlier long quiz" : quizCount ? Math.min(countDays(tried), quizCount) + " of " + quizCount : String(countDays(tried)))
-          + (tries.length === 1 ? " · 1 try" : " · " + tries.length + " tries") }),
-        el("td", { class: "nowrap", text: isNaN(new Date(last)) ? "" : new Date(last).toLocaleDateString(undefined, { day: "numeric", month: "short" }) })
+        el("td", { text: (!countDays(tried) ? t("Earlier long quiz") : quizCount ? t("{n} of {count}", { n: Math.min(countDays(tried), quizCount), count: quizCount }) : String(countDays(tried)))
+          + " · " + t(tries.length === 1 ? "1 try" : "{n} tries", { n: tries.length }) }),
+        el("td", { class: "nowrap", text: isNaN(new Date(last)) ? "" : new Date(last).toLocaleDateString(dateLocale(), { day: "numeric", month: "short" }) })
       ]);
     });
     return el("div", { class: "grid-scroll" }, [el("table", { class: "score-grid week-grid lesson-grid" }, [
       el("thead", null, [el("tr", null, [
-        el("th", { scope: "col", text: "Lesson" }),
-        el("th", { scope: "col", text: "Best score" }),
-        el("th", { scope: "col", text: "Quizzes tried" }),
-        el("th", { scope: "col", text: "Last quiz" })
+        el("th", { scope: "col", text: t("Lesson") }),
+        el("th", { scope: "col", text: t("Best score") }),
+        el("th", { scope: "col", text: t("Quizzes tried") }),
+        el("th", { scope: "col", text: t("Last quiz") })
       ])]),
       el("tbody", null, rows)
     ])]);
@@ -2687,27 +2826,27 @@
     var started = {};
     results.forEach(function (r) { started[r.lessonId] = true; });
     var nodes = [el("div", { class: "stats" }, [
-      statTile(results.length, results.length === 1 ? "quiz taken" : "quizzes taken"),
-      statTile(avg === null ? "–" : avg + "%", "average of best scores"),
-      statTile(countDays(started) + " of " + Math.max(lessons.length, countDays(started)), "lessons started"),
-      statTile(countDays(practisedDays), "words of the day practised")
+      statTile(results.length, t(results.length === 1 ? "quiz taken" : "quizzes taken")),
+      statTile(avg === null ? "–" : avg + "%", t("average of best scores")),
+      statTile(t("{n} of {count}", { n: countDays(started), count: Math.max(lessons.length, countDays(started)) }), t("lessons started")),
+      statTile(countDays(practisedDays), t("words of the day practised"))
     ])];
-    nodes.push(el("h3", { class: "report-title", text: "Lesson by lesson" }), lessonTable(results));
-    nodes.push(el("h3", { class: "report-title", text: "Week by week" }));
+    nodes.push(el("h3", { class: "report-title", text: t("Lesson by lesson") }), lessonTable(results));
+    nodes.push(el("h3", { class: "report-title", text: t("Week by week") }));
     var thisWeek = dayKey(weekStart(new Date()));
     var rows = weeklyProgress(results, practice).map(function (w) {
       var scores = bestScores(w.quizzes);
       return el("tr", null, [
         el("th", { scope: "row" }, [
           el("span", { class: "week-name", text: weekLabel(w.start) }),
-          dayKey(w.start) === thisWeek ? el("span", { class: "col-date", text: "This week" }) : null
+          dayKey(w.start) === thisWeek ? el("span", { class: "col-date", text: t("This week") }) : null
         ]),
         el("td", { class: w.quizzes.length ? null : "empty", text: w.quizzes.length ? String(w.quizzes.length) : "–" }),
         el("td", { class: "scores-cell" + (scores.length ? "" : " empty") }, scores.length ? scores.map(function (r) {
           var lesson = findLesson(r.lessonId);
           return el("span", { class: "score-line" }, [
             el("strong", { class: "score-pill " + scoreClass(r.score, r.total), text: r.score + " / " + r.total }),
-            el("span", { text: lesson ? lesson.name : r.lessonTitle || r.lessonId })
+            el("span", { text: lesson ? lessonName(lesson) : r.lessonTitle || r.lessonId })
           ]);
         }) : ["–"]),
         el("td", null, [dayDots(w.days)])
@@ -2715,18 +2854,18 @@
     });
     nodes.push(el("div", { class: "grid-scroll" }, [el("table", { class: "score-grid week-grid" }, [
       el("thead", null, [el("tr", null, [
-        el("th", { scope: "col", text: "Week" }),
-        el("th", { scope: "col", text: "Quizzes taken" }),
-        el("th", { scope: "col", text: "Best score per lesson" }),
-        el("th", { scope: "col", text: "Word of the day" })
+        el("th", { scope: "col", text: t("Week") }),
+        el("th", { scope: "col", text: t("Quizzes taken") }),
+        el("th", { scope: "col", text: t("Best score per lesson") }),
+        el("th", { scope: "col", text: t("Word of the day") })
       ])]),
       el("tbody", null, rows)
     ])]));
     var missed = missedPhrases(results);
     if (missed.length) {
       nodes.push(
-        el("h3", { class: "report-title", text: "Phrases to review" }),
-        el("p", { class: "hint", text: "The ones missed most often in quizzes." }),
+        el("h3", { class: "report-title", text: t("Phrases to review") }),
+        el("p", { class: "hint", text: t("The ones missed most often in quizzes.") }),
         missedList(missed, 12, false)
       );
     }
@@ -2744,8 +2883,8 @@
     if (clearPrint) clearPrint();
     var area = el("div", { id: "print-area" }, [
       el("div", { class: "print-head" }, [
-        el("strong", { text: "Hebrew Class" }),
-        el("span", { text: new Date().toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }) })
+        el("strong", { text: t("Hebrew Class") }),
+        el("span", { text: new Date().toLocaleDateString(dateLocale(), { day: "numeric", month: "long", year: "numeric" }) })
       ]),
       el("h1", { text: title }),
       subtitle ? el("p", { class: "lede", text: subtitle }) : null
@@ -2755,7 +2894,7 @@
     document.body.appendChild(area);
     document.head.appendChild(pageRule);
     document.documentElement.classList.add("print-report");
-    document.title = "Hebrew Class - " + title + " - " + dayKey(new Date()); // the PDF's suggested file name
+    document.title = t("Hebrew Class") + " - " + title + " - " + dayKey(new Date()); // the PDF's suggested file name
     clearPrint = function () {
       clearPrint = null;
       document.documentElement.classList.remove("print-report");
@@ -2774,8 +2913,8 @@
     return el("button", {
       class: "btn no-print",
       type: "button",
-      title: "Opens the print window: choose “Save as PDF” there",
-      text: "Download PDF",
+      title: t("Opens the print window: choose “Save as PDF” there"),
+      text: t("Download PDF"),
       onclick: makeReport
     });
   }
@@ -2788,7 +2927,7 @@
       if (res && res.ok) { report.data = { results: res.results || [], practice: res.practice || [] }; report.error = ""; }
       else report.error = backendMessage(res, "Couldn't load your progress.");
     }, function () {
-      report.error = "Couldn't reach the class service. Check your connection.";
+      report.error = t("Couldn't reach the class service. Check your connection.");
     }).then(function () {
       report.loading = false;
       if (state.route.view === "progress" || (onQuizTab() && !state.quiz) || (onWordTab() && !(state.wotd && state.wotd.step === "ask"))) render();
@@ -2806,32 +2945,32 @@
   function renderMyProgress() {
     var report = state.report;
     var wrap = el("section", null, [
-      el("h1", { text: "My progress" }),
-      el("p", { class: "lede", text: state.student.name + " · your quiz scores and Word of the day practice, week by week." })
+      el("h1", { text: t("My progress") }),
+      el("p", { class: "lede", text: state.student.name + " · " + t("your quiz scores and Word of the day practice, week by week.") })
     ]);
     if (!config.resultsUrl) {
-      wrap.appendChild(el("p", { class: "notice", text: NOT_CONNECTED }));
+      wrap.appendChild(el("p", { class: "notice", text: t(NOT_CONNECTED) }));
       return wrap;
     }
     if (report.error) wrap.appendChild(el("p", { class: "notice error", text: report.error }));
     if (!report.data) {
-      if (!report.error) wrap.appendChild(el("p", { class: "notice", text: "Loading your progress…" }));
+      if (!report.error) wrap.appendChild(el("p", { class: "notice", text: t("Loading your progress…") }));
       return wrap;
     }
     var empty = !report.data.results.length && !report.data.practice.length;
     if (!empty) {
       wrap.appendChild(el("div", { class: "actions report-actions" }, [
         pdfButton(function () {
-          printReport("Progress report", state.student.name, reportNodes(report.data.results, report.data.practice));
+          printReport(t("Progress report"), state.student.name, reportNodes(report.data.results, report.data.practice));
         }),
-        el("span", { class: "hint no-print", text: "Opens the print window. Choose “Save as PDF” there." })
+        el("span", { class: "hint no-print", text: t("Opens the print window. Choose “Save as PDF” there.") })
       ]));
     }
     wrap.appendChild(el("div", { class: "card dash-card" }, reportNodes(report.data.results, report.data.practice)));
-    if (empty) wrap.appendChild(el("p", { class: "notice", text: "Nothing here yet. Take a quiz or practise the word of the day and it will show up." }));
+    if (empty) wrap.appendChild(el("p", { class: "notice", text: t("Nothing here yet. Take a quiz or practise the word of the day and it will show up.") }));
     wrap.appendChild(el("p", { class: "hint", text: state.student.token
-      ? "Only you and your teacher can see this report."
-      : "You signed in without a PIN, so anyone who types your name can see this page. To keep it private, sign out and sign in again with a PIN of your choice." }));
+      ? t("Only you and your teacher can see this report.")
+      : t("You signed in without a PIN, so anyone who types your name can see this page. To keep it private, sign out and sign in again with a PIN of your choice.") }));
     return wrap;
   }
 
@@ -2927,7 +3066,7 @@
       live.error = "";
       if (!res.running) live.teacherIndex = null;
     }).catch(function () {
-      live.error = "Couldn't reach the class service. Retrying…";
+      live.error = t("Couldn't reach the class service. Retrying…");
     }).then(function () {
       live.checked = true;
       renderLiveIfChanged();
@@ -2977,7 +3116,7 @@
     callBackend({ action: "liveSet", passcode: state.teacher.passcode, index: index, seq: live.seq }).then(function (res) {
       if (res && res.error === "wrong-passcode") { forgetTeacherPasscode(); render(); }
     }, function () {
-      live.error = "That change may not have reached the students. Check your connection.";
+      live.error = t("That change may not have reached the students. Check your connection.");
       render();
     });
   }
@@ -2995,10 +3134,10 @@
         forgetTeacherPasscode();
         state.teacher.error = "That passcode didn't work. Check it matches the one in your Google script.";
       } else {
-        live.error = "Couldn't start the class. Try again.";
+        live.error = t("Couldn't start the class. Try again.");
       }
     }, function () {
-      live.error = "Couldn't reach the class service. Check your connection and try again.";
+      live.error = t("Couldn't reach the class service. Check your connection and try again.");
     }).then(function () {
       live.busy = false;
       render();
@@ -3007,7 +3146,7 @@
   }
 
   function endLiveClass() {
-    if (!window.confirm("End the live class for everyone?")) return;
+    if (!window.confirm(t("End the live class for everyone?"))) return;
     live.busy = true;
     render();
     callBackend({ action: "liveEnd", passcode: state.teacher.passcode }).then(function (res) {
@@ -3017,7 +3156,7 @@
         live.attendees = [];
       }
     }, function () {
-      live.error = "Couldn't end the class. Try again.";
+      live.error = t("Couldn't end the class. Try again.");
     }).then(function () {
       live.busy = false;
       render();
@@ -3040,16 +3179,16 @@
         boardChanged();
       } else if (res && res.error === "not-live") {
         live.remote = { running: false };
-        live.joinError = "The class isn't live right now.";
+        live.joinError = t("The class isn't live right now.");
       } else if (res && res.error === "bad-name") {
-        live.joinError = "Please enter your name.";
+        live.joinError = t("Please enter your name.");
       } else if (res && res.error === "bad-email") {
-        live.joinError = "That email doesn't look right. You can also leave it empty.";
+        live.joinError = t("That email doesn't look right. You can also leave it empty.");
       } else {
-        live.joinError = "Couldn't join. Try again.";
+        live.joinError = t("Couldn't join. Try again.");
       }
     }, function () {
-      live.joinError = "Couldn't reach the class service. Check your connection and try again.";
+      live.joinError = t("Couldn't reach the class service. Check your connection and try again.");
     }).then(function () {
       live.joining = false;
       render();
@@ -3061,7 +3200,7 @@
     live.shownKey = liveKey();
 
     if (!config.resultsUrl) {
-      return el("p", { class: "notice", text: "The live class needs the Google script connected (see README.md)." });
+      return el("p", { class: "notice", text: t("The live class needs the Google script connected (see README.md).") });
     }
     var parts = [];
     // Students see the vowel marks switch only once there are words to show.
@@ -3073,7 +3212,7 @@
 
   function liveCard(lesson, index, teacher) {
     var list = cardList(lesson);
-    if (!list.length) return [el("p", { class: "notice", text: "This lesson has no phrases yet." })];
+    if (!list.length) return [el("p", { class: "notice", text: t("This lesson has no phrases yet.") })];
     index = Math.min(index, list.length - 1);
     var pct = Math.round(((index + 1) / list.length) * 100);
     var card = wordCard(list[index]);
@@ -3084,14 +3223,14 @@
     if (teacher) {
       addSwipe(card, moveLive);
       nodes.push(el("div", { class: "card-nav" }, [
-        el("button", { class: "btn", type: "button", disabled: index === 0, onclick: function () { moveLive(-1); }, text: "← Previous" }),
+        el("button", { class: "btn", type: "button", disabled: index === 0, onclick: function () { moveLive(-1); }, text: t("← Previous") }),
         el("span", { class: "card-count", "aria-live": "polite", text: (index + 1) + " / " + list.length }),
-        el("button", { class: "btn primary", type: "button", disabled: index === list.length - 1, onclick: function () { moveLive(1); }, text: "Next word →" })
+        el("button", { class: "btn primary", type: "button", disabled: index === list.length - 1, onclick: function () { moveLive(1); }, text: t("Next word →") })
       ]));
     } else {
       nodes.push(el("p", { class: "live-follow", "aria-live": "polite" }, [
         el("span", { class: "live-dot on", "aria-hidden": "true" }),
-        "Following your teacher · " + (index + 1) + " / " + list.length
+        t("Following your teacher") + " · " + (index + 1) + " / " + list.length
       ]));
     }
     var explanation = sectionExplanation(list[index]);
@@ -3103,17 +3242,17 @@
     var r = live.remote || {};
     var wrap = el("div");
     if (!live.checked) {
-      wrap.appendChild(el("p", { class: "notice", text: "Checking whether a class is live…" }));
+      wrap.appendChild(el("p", { class: "notice", text: t("Checking whether a class is live…") }));
       return wrap;
     }
     if (!liveHere(lesson)) {
       var other = r.running && findLesson(r.lessonId);
       wrap.appendChild(el("div", { class: "card live-start" }, [
-        el("h2", { text: "Teach this lesson live" }),
-        el("p", { text: "Start the class, then share this page's link with your students. They join with their name and see whichever word you're on, a few seconds after you move." }),
-        r.running ? el("p", { class: "notice", text: "A live class is already running for “" + (other ? other.name : r.lessonId) + "”. Starting here ends it." }) : null,
+        el("h2", { text: t("Teach this lesson live") }),
+        el("p", { text: t("Start the class, then share this page's link with your students. They join with their name and see whichever word you're on, a few seconds after you move.") }),
+        r.running ? el("p", { class: "notice", text: t("A live class is already running for “{lesson}”. Starting here ends it.", { lesson: other ? lessonName(other) : r.lessonId }) }) : null,
         el("div", { class: "actions" }, [
-          el("button", { class: "btn primary", type: "button", disabled: live.busy, onclick: function () { startLiveClass(lesson); }, text: live.busy ? "Starting…" : "Start live class" })
+          el("button", { class: "btn primary", type: "button", disabled: live.busy, onclick: function () { startLiveClass(lesson); }, text: live.busy ? t("Starting…") : t("Start live class") })
         ])
       ]));
       wrap.appendChild(teacherSignOut());
@@ -3124,22 +3263,22 @@
     var people = live.attendees;
     wrap.appendChild(el("div", { class: "card live-panel" }, [
       el("div", { class: "live-panel-head" }, [
-        el("h2", null, [el("span", { class: "live-dot on", "aria-hidden": "true" }), "Live now"]),
-        el("button", { class: "btn", type: "button", disabled: live.busy, onclick: endLiveClass, text: "End class" })
+        el("h2", null, [el("span", { class: "live-dot on", "aria-hidden": "true" }), t("Live now")]),
+        el("button", { class: "btn", type: "button", disabled: live.busy, onclick: endLiveClass, text: t("End class") })
       ]),
-      el("p", { class: "muted", text: people.length ? people.length + (people.length === 1 ? " student has" : " students have") + " joined:" : "No students have joined yet. Share this page's link with them." }),
+      el("p", { class: "muted", text: people.length ? t(people.length === 1 ? "1 student has joined:" : "{n} students have joined:", { n: people.length }) : t("No students have joined yet. Share this page's link with them.") }),
       people.length ? el("ul", { class: "live-people" }, people.map(function (p) {
         return el("li", { text: attendeeLabel(p) });
       })) : null,
-      el("p", { class: "hint", text: "Use the ← → arrow keys or the buttons to move. Students' screens follow within a few seconds." })
+      el("p", { class: "hint", text: t("Use the ← → arrow keys or the buttons to move. Students' screens follow within a few seconds.") })
     ]));
     return wrap;
   }
 
   function teacherSignOut() {
     return el("p", { class: "hint" }, [
-      "You're signed in as the teacher on this browser. ",
-      el("button", { class: "linklike", type: "button", text: "Sign out", onclick: signOut })
+      t("You're signed in as the teacher on this browser.") + " ",
+      el("button", { class: "linklike", type: "button", text: t("Sign out"), onclick: signOut })
     ]);
   }
 
@@ -3147,24 +3286,24 @@
     var r = live.remote || {};
     var wrap = el("div");
     if (!live.checked) {
-      wrap.appendChild(el("p", { class: "notice", text: "Checking whether the class is live…" }));
+      wrap.appendChild(el("p", { class: "notice", text: t("Checking whether the class is live…") }));
     } else if (!r.running) {
       wrap.appendChild(el("div", { class: "card live-start" }, [
-        el("h2", { text: live.joinedThisVisit ? "The live class has ended" : "The class isn't live right now" }),
-        el("p", { text: live.joinedThisVisit ? "Thanks for joining! You can keep practising with Word by word or the quiz." : "When your teacher starts the class, you can join here. This page checks every few seconds, so you can leave it open." })
+        el("h2", { text: live.joinedThisVisit ? t("The live class has ended") : t("The class isn't live right now") }),
+        el("p", { text: live.joinedThisVisit ? t("Thanks for joining! You can keep practising with Word by word or the quiz.") : t("When your teacher starts the class, you can join here. This page checks every few seconds, so you can leave it open.") })
       ]));
     } else if (r.lessonId !== lesson.id) {
       var other = findLesson(r.lessonId);
       wrap.appendChild(el("div", { class: "card live-start" }, [
-        el("h2", { text: "The live class is on another lesson" }),
-        other ? el("a", { class: "btn primary", href: lessonUrl(other, "live"), text: "Go to “" + other.name + "”" }) : el("p", { text: "Reload the page to see the newest lessons." })
+        el("h2", { text: t("The live class is on another lesson") }),
+        other ? el("a", { class: "btn primary", href: lessonUrl(other, "live"), text: t("Go to “{lesson}”", { lesson: lessonName(other) }) }) : el("p", { text: t("Reload the page to see the newest lessons.") })
       ]));
     } else if (live.joinedSession !== r.sessionId) {
       wrap.appendChild(joinForm());
     } else {
       live.joinedThisVisit = true;
       liveCard(lesson, liveIndex(), false).forEach(function (n) { wrap.appendChild(n); });
-      wrap.appendChild(el("p", { class: "hint live-signed", text: "Joined as " + (live.joinedAs || state.studentName) }));
+      wrap.appendChild(el("p", { class: "hint live-signed", text: t("Joined as {name}", { name: live.joinedAs || state.studentName }) }));
     }
     return wrap;
   }
@@ -3193,12 +3332,12 @@
         if (name && !live.joining) joinLiveClass(name, emailInput.value.trim());
       }
     }, [
-      el("h2", null, [el("span", { class: "live-dot on", "aria-hidden": "true" }), "The class is live"]),
-      el("p", { text: "Enter your name to join. You'll see the word your teacher is on." }),
-      el("div", { class: "field" }, [el("label", { for: "live-name", text: "Your name" }), nameInput]),
-      el("div", { class: "field" }, [el("label", { for: "live-email", text: "Your email (optional)" }), emailInput]),
+      el("h2", null, [el("span", { class: "live-dot on", "aria-hidden": "true" }), t("The class is live")]),
+      el("p", { text: t("Enter your name to join. You'll see the word your teacher is on.") }),
+      el("div", { class: "field" }, [el("label", { for: "live-name", text: t("Your name") }), nameInput]),
+      el("div", { class: "field" }, [el("label", { for: "live-email", text: t("Your email (optional)") }), emailInput]),
       live.joinError ? el("p", { class: "notice error", text: live.joinError }) : null,
-      el("button", { class: "btn primary", type: "submit", disabled: live.joining, text: live.joining ? "Joining…" : "Join the class" })
+      el("button", { class: "btn primary", type: "submit", disabled: live.joining, text: live.joining ? t("Joining…") : t("Join the class") })
     ]);
   }
 
@@ -3325,7 +3464,7 @@
   function formatTime(iso) {
     var d = new Date(iso);
     if (isNaN(d)) return iso;
-    return d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleString(dateLocale(), { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   }
 
   function scoreClass(score, total) {
@@ -3365,7 +3504,7 @@
     }
 
     var status = t.loading && !t.results ? "Loading results…"
-      : t.updatedAt ? "Updated " + t.updatedAt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " · refreshes every 30 seconds"
+      : t.updatedAt ? "Updated " + t.updatedAt.toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " · refreshes every 30 seconds"
       : "";
     wrap.appendChild(el("div", { class: "toolbar dash-toolbar" }, [
       el("p", { class: "dash-status", text: status }),
@@ -3703,7 +3842,7 @@
     var head = el("tr", null, [el("th", { scope: "col", text: "Student" })].concat(lessonIds.map(function (id) {
       var lesson = findLesson(id);
       return el("th", { scope: "col" }, [
-        el("span", { class: "col-title", text: lesson ? lesson.name : lessonTitles[id] || id })
+        el("span", { class: "col-title", text: lesson ? lessonName(lesson) : lessonTitles[id] || id })
       ]);
     })));
 
@@ -3744,7 +3883,7 @@
     if (!attempts.length) return null;
     var lesson = findLesson(sel.lessonId);
     return el("div", { class: "card dash-card" }, [
-      el("h2", { text: attempts[attempts.length - 1].student.trim() + " · " + (lesson ? lesson.name : attempts[0].lessonTitle) }),
+      el("h2", { text: attempts[attempts.length - 1].student.trim() + " · " + (lesson ? lessonName(lesson) : attempts[0].lessonTitle) }),
       el("ul", { class: "attempts" }, attempts.map(function (r) {
         return el("li", null, [
           el("div", { class: "attempt-head" }, [
@@ -3765,7 +3904,7 @@
         var lesson = findLesson(r.lessonId);
         return el("li", null, [
           el("span", { class: "recent-name", text: r.student.trim() }),
-          el("span", { class: "muted", text: (lesson ? lesson.name : r.lessonTitle) + " · " + formatTime(r.finishedAt) }),
+          el("span", { class: "muted", text: (lesson ? lessonName(lesson) : r.lessonTitle) + " · " + formatTime(r.finishedAt) }),
           el("strong", { class: "score-pill " + scoreClass(r.score, r.total), text: r.score + " / " + r.total })
         ]);
       }))

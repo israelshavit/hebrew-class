@@ -102,6 +102,19 @@ a { color: var(--accent-dark); }
   cursor: pointer;
 }
 .topnav-out:hover { background: rgba(255, 255, 255, .14); }
+/* The English / Español menu, styled like the Sign out button */
+.lang-select {
+  padding: 3px 6px;
+  border: 1px solid rgba(255, 255, 255, .6);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.lang-select:hover { background: rgba(255, 255, 255, .14); }
+.lang-select:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.lang-select option { background: var(--surface); color: var(--text); }
 .topnav-out:focus-visible, .brand:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .brand {
   color: #fff;
@@ -818,6 +831,7 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
   /* Five items have to fit across a phone. */
   .mainnav-link { flex: 1 1 auto; padding: 12px 4px 9px; font-size: .88rem; text-align: center; }
   .topnav-out { padding: 2px 8px; }
+  .lang-select { padding: 2px 4px; }
   .stats { gap: 6px; grid-template-columns: repeat(2, 1fr); }
   .week-head { flex-wrap: wrap; }
   .missed-list li { grid-template-columns: 1fr auto; }

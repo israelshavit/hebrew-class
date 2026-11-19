@@ -15,17 +15,29 @@ Across the whole site (menu at the top of every page):
 - **My progress**: each student's quiz scores and Word of the day practice, lesson by lesson and week by week, with the phrases they miss most. The teacher sees everyone's on the Teacher page, with the class's totals for the week and its most missed phrases.
 - **Download PDF** on a report opens the browser's print window; choose "Save as PDF" there. The teacher can save the class report or one student's.
 - **Share** (in the top menu) sends the site's link (`siteUrl` in `config.js`) by the phone's share menu (on phones and tablets), WhatsApp, email or a copied link.
+- **English / Español** (the menu in the blue top bar, also before signing in): the interface language, remembered on each device. It's English until someone chooses Español. See [English and Spanish](#english-and-spanish).
 
 There is no build step. Open `index.html` in a browser to try it locally.
 
 ## Adding a lesson
 
 1. Copy a file in `lessons/` and name it `YYYY-MM-DD-topic.js`.
-2. Fill in its rows. A row is `["English", "Transliteration", "Hebrew"]`. For male/female forms use
-   `["English (m/f)", ["translit m", "translit f"], ["Hebrew m", "Hebrew f"]]`; write `(to m/f)` when the forms depend on who you're talking to.
+2. Fill in its rows. A row is `["English", "Transliteration", "Hebrew", "Spanish"]`. For male/female forms use
+   `["English (m/f)", ["translit m", "translit f"], ["Hebrew m", "Hebrew f"], "Spanish (m/f)"]`; write `(to m/f)` when the forms depend on who you're talking to (in the Spanish, `(a él/ella)`). In the Spanish, `cansado/a` shows as "cansado" or "cansada" in the quiz.
    A section can have an `explanation` (shown above its phrases on the sheet, and under the buttons in Word by word). Set `video` (and `videoTitle`) to link the lesson's video: it appears at the end of the sheet and under Self study → Resources.
+   The lesson and each section also get `es: { ... }` with their title, subtitle, notes and explanation in Spanish (copy an existing lesson).
 3. Add the file name (without `.js`) to `lessons/index.js`. Lessons are numbered by date: the oldest is shown as "Lesson 1".
 4. Change the version in `version.js` (the date and time will do), then commit and push. GitHub Pages updates the site in a minute or two, and a page already open on a phone or computer reloads itself to get it the next time it comes back on screen (except in the middle of a quiz or with something typed and not sent; then it waits for the next time).
+
+## English and Spanish
+
+Each student picks **English** or **Español** in the top bar. Hebrew is what everyone learns; the language only changes what's around it:
+
+- **Everything a student sees** switches: menus, sign-in and PIN help, quizzes, Word of the day, How to say, Live class, My progress and its PDF, Share, Suggestions and the championship board. The interface text is in `lang/es.js` ("English": "Spanish" per line). Text missing there shows in English, and on `localhost` the browser console lists it ("No Spanish yet for …").
+- **The lessons**: in Spanish the sheet, Word by word, the quizzes and the Word of the day show each phrase's Spanish (the fourth item of a row) instead of the English, and the lesson's Spanish title, notes and explanations.
+- **How to say** takes typed or spoken Spanish. It needs the latest `Code.gs`; with an older one, a student using Spanish is told it isn't switched on yet.
+- **PIN emails**: the reset code comes in the language the student is using. The temporary PIN you send from the Teacher page is in both languages.
+- **The Teacher page stays in English.** Quiz misses are saved in English, so your reports read the same whichever language a student uses; a student in Spanish sees their own misses in Spanish.
 
 ## Getting quiz results
 
