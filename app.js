@@ -20,6 +20,9 @@
   var CHOICES_PER_QUIZ = 4;
   var PAIRS_PER_QUIZ = 4;
 
+  // Recent activity on the Teacher page shows this many lines, and this many more per "Show more".
+  var ACTIVITY_PAGE = 15;
+
   // Vowel points and other marks, but not maqaf (U+05BE) or sof pasuq (U+05C3).
   var NIQQUD = /[֑-ׇֽֿׁׂׅׄ]/g;
 
@@ -55,6 +58,12 @@
       results: null,
       practice: [],
       students: [],
+      signIns: null,  // null: a Google script from before the sign-in log
+      classes: null,  // the latest live class joins; null as for signIns
+      classNames: null, // everyone who ever joined a live class; null: use the names in classes
+      activityKind: "all",     // the Recent activity filter
+      activityOpen: null,      // the Recent activity number whose names are listed
+      activityShown: ACTIVITY_PAGE,
       loading: false,
       error: "",
       updatedAt: null,
@@ -3355,6 +3364,9 @@
         t.practice = res.practice || [];
         t.students = res.students || [];
         t.pinChanges = res.pinChanges || null; // null: a Google script from before the PIN log
+        t.signIns = res.signIns || null;
+        t.classes = res.classes || null;
+        t.classNames = res.classNames || null;
         t.error = "";
         t.updatedAt = new Date();
       } else if (res && res.error === "wrong-passcode") {
@@ -3518,6 +3530,7 @@
       wrap.appendChild(el("p", { class: "notice", text: "No students yet. They appear here as soon as someone signs in, finishes a quiz or practises the word of the day." }));
       return wrap;
     }
+    wrap.appendChild(renderActivityCard(t));
     wrap.appendChild(renderWeekCard(t));
     if (t.report) wrap.appendChild(renderStudentReport(t));
     wrap.appendChild(renderBoardCard(t));
@@ -3526,7 +3539,6 @@
       if (t.selected) wrap.appendChild(renderAttempts(t));
       var missedCard = renderMissedCard(t);
       if (missedCard) wrap.appendChild(missedCard);
-      wrap.appendChild(renderRecent(t));
     }
     var countriesCard = renderCountriesCard(t);
     if (countriesCard) wrap.appendChild(countriesCard);
@@ -3539,10 +3551,13 @@
   // Google script saves countries.
   function renderCountriesCard(t) {
     var counts = {};
+    var codes = {};
     var unknown = 0;
     t.students.forEach(function (s) {
-      if (s.country) counts[s.country] = (counts[s.country] || 0) + 1;
-      else unknown += 1;
+      if (s.country) {
+        counts[s.country] = (counts[s.country] || 0) + 1;
+        if (s.countryCode) codes[s.country] = s.countryCode;
+      } else unknown += 1;
     });
     var countries = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a] || a.localeCompare(b); });
     if (!countries.length) return null;
@@ -3551,7 +3566,7 @@
       el("p", { class: "hint", text: "From each student's device time zone, saved when they sign in or next open the site." + (unknown ? " Not known yet: " + unknown + (unknown === 1 ? " student." : " students.") : "") }),
       el("ul", { class: "country-list" }, countries.map(function (country) {
         return el("li", null, [
-          el("span", { text: country }),
+          el("span", null, [flagIcon(codes[country]), country]),
           el("span", { class: "country-count", text: String(counts[country]) })
         ]);
       }))
@@ -3719,7 +3734,7 @@
         ])
       ]),
       email || (onFile && onFile.timeZone) ? el("p", { class: "hint" }, [
-        onFile && onFile.timeZone ? el("span", { title: "Time zone " + onFile.timeZone, text: onFile.country || onFile.timeZone }) : null,
+        onFile && onFile.timeZone ? el("span", { title: "Time zone " + onFile.timeZone }, [flagIcon(onFile.countryCode), onFile.country || onFile.timeZone]) : null,
         email && onFile && onFile.timeZone ? " · " : null,
         email ? el("a", { href: "mailto:" + email, text: email }) : null
       ]) : null,
@@ -3896,19 +3911,225 @@
     ]);
   }
 
-  function renderRecent(t) {
-    var recent = t.results.slice().sort(function (a, b) { return a.finishedAt < b.finishedAt ? 1 : -1; }).slice(0, 10);
-    return el("div", { class: "card dash-card" }, [
-      el("h2", { text: "Latest quizzes" }),
-      el("ul", { class: "recent" }, recent.map(function (r) {
-        var lesson = findLesson(r.lessonId);
-        return el("li", null, [
-          el("span", { class: "recent-name", text: r.student.trim() }),
-          el("span", { class: "muted", text: (lesson ? lessonName(lesson) : r.lessonTitle) + " · " + formatTime(r.finishedAt) }),
-          el("strong", { class: "score-pill " + scoreClass(r.score, r.total), text: r.score + " / " + r.total })
-        ]);
-      }))
+  /* ---------- Recent activity ---------- */
+
+  var ACTIVITY_KINDS = [
+    { kind: "all", label: "All" },
+    { kind: "signin", label: "Sign-ins" },
+    { kind: "quiz", label: "Quizzes" },
+    { kind: "practice", label: "Word of the day" },
+    { kind: "live", label: "Live class" },
+    { kind: "suggestion", label: "Suggestions" }
+  ];
+
+  // What students did, newest first: sign-ins (the first one is the Joined
+  // date on the Students sheet), quizzes, Words of the day, live class joins
+  // and suggestions.
+  function activityItems(t) {
+    var items = [];
+    function add(kind, at, student, tag, detail, result) {
+      var date = new Date(at);
+      var name = String(student || "").trim();
+      if (isNaN(date) || !name) return;
+      items.push({ kind: kind, at: date, student: name, tag: tag, detail: detail, result: result || null });
+    }
+    t.students.forEach(function (s) { add("signin", s.joinedAt, s.name, "New student", "First sign-in"); });
+    (t.signIns || []).forEach(function (s) { add("signin", s.at, s.student, "Signed in", ""); });
+    t.results.forEach(function (r) {
+      var lesson = findLesson(r.lessonId);
+      add("quiz", r.finishedAt, r.student, "Quiz", (lesson ? lessonName(lesson) : r.lessonTitle) + (r.quiz ? " · quiz " + r.quiz : ""), r);
+    });
+    t.practice.forEach(function (p) { add("practice", p.at, p.student, "Word of the day", p.word); });
+    // Each student once per class, when they first joined it (the rows come oldest first).
+    var joined = {};
+    var byEmail = studentEmails(t);
+    (t.classes || []).forEach(function (c) {
+      var name = byEmail[studentKey(c.student)] || c.student;
+      var key = c.classId + "|" + studentKey(name);
+      if (joined[key]) return;
+      joined[key] = true;
+      var lesson = findLesson(c.lessonId);
+      add("live", c.at, name, "Live class", lesson ? lessonName(lesson) : c.lessonId);
+    });
+    (state.suggestions.items || []).forEach(function (s) {
+      if (s.student === "Teacher") return; // the teacher's own notes
+      var text = String(s.text || "").replace(/\s+/g, " ").trim();
+      add("suggestion", s.at, s.student, "Suggestion", "“" + (text.length > 90 ? text.slice(0, 89).trim() + "…" : text) + "”");
+    });
+    return items.sort(function (a, b) { return b.at - a.at; });
+  }
+
+  // "Just now", "5 min ago", "Today, 14:05", "Yesterday, 09:12", or the date.
+  function whenText(date) {
+    var mins = Math.floor((Date.now() - date.getTime()) / 60000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return mins + " min ago";
+    var time = date.toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
+    var today = new Date();
+    if (dayKey(date) === dayKey(today)) return "Today, " + time;
+    if (dayKey(date) === dayKey(addDays(today, -1))) return "Yesterday, " + time;
+    return formatTime(date.toISOString());
+  }
+
+  // Each signed-in student's name by their email, for live class joins
+  // saved with only an email.
+  function studentEmails(t) {
+    var names = {};
+    t.students.forEach(function (s) { if (s.email) names[studentKey(s.email)] = String(s.name).trim(); });
+    return names;
+  }
+
+  // Names with "test" in them are left out of the numbers.
+  function isTestName(name) {
+    return /test/i.test(name);
+  }
+
+  // Everyone who signed in, took a quiz, practised or joined a live class,
+  // each once, without test names: { key: name }.
+  function countedStudents(t) {
+    var byEmail = studentEmails(t);
+    var names = {};
+    function add(name) {
+      name = byEmail[studentKey(name)] || String(name || "").trim();
+      var key = studentKey(name);
+      if (key && !isTestName(name) && !names[key]) names[key] = name;
+    }
+    knownStudents(t).forEach(function (s) { add(s.name); });
+    (t.classNames || (t.classes || []).map(function (c) { return c.student; })).forEach(add);
+    return names;
+  }
+
+  // Each signed-in student's country, by name key: { country, code }. The
+  // code, for the flag, needs the latest Google script.
+  function studentPlaces(t) {
+    var places = {};
+    t.students.forEach(function (s) {
+      if (s.country) places[studentKey(s.name)] = { country: s.country, code: s.countryCode || "" };
+    });
+    return places;
+  }
+
+  // A country's flag from its two-letter code, "IL" → 🇮🇱. Windows has no flag
+  // emoji, so styles.css draws them with the Twemoji Country Flags font.
+  function flagIcon(code) {
+    if (!/^[A-Z]{2}$/.test(code || "")) return null;
+    var flag = String.fromCodePoint(0x1F1E6 + code.charCodeAt(0) - 65, 0x1F1E6 + code.charCodeAt(1) - 65);
+    return el("span", { class: "flag", "aria-hidden": "true", text: flag });
+  }
+
+  // The flag and the country, or nothing when the country isn't known.
+  function countryLabel(place) {
+    return place ? el("span", { class: "activity-country" }, [flagIcon(place.code), place.country]) : null;
+  }
+
+  // The four numbers, each with the names behind it, without test names.
+  function activityNumbers(t, items) {
+    var now = new Date();
+    var today = dayKey(now);
+    var weekAgo = now.getTime() - 7 * 86400000;
+    var activeToday = {};
+    var activeWeek = {};
+    items.forEach(function (a) {
+      if (isTestName(a.student)) return;
+      var key = studentKey(a.student);
+      if (a.at.getTime() >= weekAgo && !activeWeek[key]) activeWeek[key] = a.student;
+      if (dayKey(a.at) === today && !activeToday[key]) activeToday[key] = a.student;
+    });
+    var joined = {};
+    t.students.forEach(function (s) {
+      var name = String(s.name).trim();
+      if (!isTestName(name) && new Date(s.joinedAt).getTime() >= weekAgo) joined[studentKey(name)] = name;
+    });
+    return [
+      { id: "total", names: countedStudents(t), one: "student in total", many: "students in total" },
+      { id: "today", names: activeToday, one: "active today", many: "active today" },
+      { id: "week", names: activeWeek, one: "active in the last 7 days", many: "active in the last 7 days" },
+      { id: "new", names: joined, one: "new student in the last 7 days", many: "new students in the last 7 days" }
+    ];
+  }
+
+  // The numbers as buttons; the one tapped lists its names underneath.
+  function activityStats(t, items, places) {
+    var numbers = activityNumbers(t, items);
+    var open = numbers.filter(function (n) { return n.id === t.activityOpen; })[0];
+    var nodes = [el("div", { class: "stats" }, numbers.map(function (n) {
+      var count = Object.keys(n.names).length;
+      var on = n === open;
+      return el("button", {
+        type: "button",
+        class: "stat stat-button" + (on ? " active" : ""),
+        "aria-expanded": on ? "true" : "false",
+        "aria-controls": on ? "activity-names" : null,
+        onclick: function () { t.activityOpen = on ? null : n.id; render(); }
+      }, [
+        el("span", { class: "stat-value", text: String(count) }),
+        el("span", { class: "stat-label", text: count === 1 ? n.one : n.many })
+      ]);
+    }))];
+    if (open) {
+      var keys = Object.keys(open.names).sort(function (a, b) { return open.names[a].localeCompare(open.names[b]); });
+      nodes.push(el("div", { class: "activity-names", id: "activity-names" }, [
+        el("div", { class: "activity-names-head" }, [
+          el("strong", { text: keys.length + " " + (keys.length === 1 ? open.one : open.many) }),
+          el("button", { class: "btn", type: "button", text: "Close", onclick: function () { t.activityOpen = null; render(); } })
+        ]),
+        keys.length ? el("ul", { class: "name-list" }, keys.map(function (key) {
+          return el("li", null, [el("span", { text: open.names[key] }), countryLabel(places[key])]);
+        })) : el("p", { class: "hint", text: "No one yet." })
+      ]));
+    }
+    return nodes;
+  }
+
+  function activityLine(a, places) {
+    var iso = a.at.toISOString();
+    return el("li", null, [
+      el("span", { class: "recent-name" }, [
+        a.student,
+        countryLabel(places[studentKey(a.student)]),
+        el("span", { class: "activity-tag" + (a.tag === "New student" ? " new" : ""), text: a.tag })
+      ]),
+      el("span", { class: "muted" }, [
+        a.detail ? a.detail + " · " : null,
+        el("time", { datetime: iso, title: formatTime(iso), text: whenText(a.at) })
+      ]),
+      a.result ? el("strong", { class: "score-pill " + scoreClass(a.result.score, a.result.total), text: a.result.score + " / " + a.result.total }) : null
     ]);
+  }
+
+  // The class's numbers, then everything students did, newest first, with a
+  // filter by kind and "Show more".
+  function renderActivityCard(t) {
+    var all = activityItems(t);
+    var kind = t.activityKind;
+    var items = kind === "all" ? all : all.filter(function (a) { return a.kind === kind; });
+    var shown = items.slice(0, t.activityShown);
+    var oldScript = t.signIns === null && (kind === "all" || kind === "signin" || kind === "live");
+    var places = studentPlaces(t);
+    return el("div", { class: "card dash-card" }, [
+      el("h2", { text: "Recent activity" }),
+      el("p", { class: "hint", text: "Students: everyone who has signed in, taken a quiz, practised or joined a live class; the numbers leave out names with “test” in them. Active: did any of those, or posted a suggestion. Tap a number to see the names. The list is newest first. Students stay signed in on their devices, so a sign-in shows only on a new device or after signing out." })
+    ].concat(activityStats(t, all, places), [
+      el("div", { class: "subtabs activity-filters", role: "group", "aria-label": "Show" }, ACTIVITY_KINDS.map(function (k) {
+        var on = k.kind === kind;
+        return el("button", {
+          type: "button",
+          class: "subtab activity-filter" + (on ? " active" : ""),
+          "aria-pressed": on ? "true" : "false",
+          text: k.label,
+          onclick: function () { t.activityKind = k.kind; t.activityShown = ACTIVITY_PAGE; render(); }
+        });
+      })),
+      oldScript ? el("p", { class: "notice", text: "Sign-ins after the first one, and live class joins, show here once you paste the new results-sheet/Code.gs into your Google script and deploy a new version (Deploy → Manage deployments → Edit → Version: New version)." }) : null,
+      shown.length ? el("ul", { class: "recent activity-list" }, shown.map(function (a) { return activityLine(a, places); }))
+        : el("p", { class: "notice", text: "Nothing here yet." }),
+      items.length > shown.length ? el("button", {
+        class: "btn",
+        type: "button",
+        text: "Show more",
+        onclick: function () { t.activityShown += ACTIVITY_PAGE; render(); }
+      }) : null
+    ]));
   }
 
   /* ---------- New versions ---------- */
@@ -3967,14 +4188,15 @@
 
   /* ---------- Start ---------- */
 
+  // The Teacher page also reloads the suggestions, for Recent activity.
   setInterval(function () {
-    if (onTeacherPage() && !document.hidden) loadResults();
+    if (onTeacherPage() && !document.hidden) { loadResults(); loadSuggestions(); }
   }, REFRESH_MS);
   document.addEventListener("visibilitychange", function () {
     if (document.hidden) return;
     checkForNewVersion();
     sendPlace(); // only when the time zone has changed
-    if (onTeacherPage()) loadResults();
+    if (onTeacherPage()) { loadResults(); loadSuggestions(); }
   });
   // Back on the page from the browser's back and forward cache.
   window.addEventListener("pageshow", function (e) {

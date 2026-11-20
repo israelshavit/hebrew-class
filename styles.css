@@ -817,6 +817,42 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .country-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 .signin-note { margin: 12px 0 0; }
 .pin-changes .muted { margin-left: auto; }
+.activity-filters { margin-bottom: 4px; }
+.activity-filter { font-family: inherit; cursor: pointer; }
+.activity-tag {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: .75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+.activity-tag.new { border-color: var(--good); background: var(--good-soft); color: var(--good); }
+.activity-country { margin-left: 8px; color: var(--muted); font-size: .85rem; font-weight: 400; white-space: nowrap; }
+/* Country flags on the Teacher page. Windows has no flag emoji, so they come
+   from this font; the browser downloads it (78 KB) only when a flag is shown. */
+@font-face {
+  font-family: "Twemoji Country Flags";
+  src: url("https://cdn.jsdelivr.net/npm/country-flag-emoji-polyfill@0.1.8/dist/TwemojiCountryFlags.woff2") format("woff2");
+  unicode-range: U+1F1E6-1F1FF;
+  font-display: swap;
+}
+.flag { margin-right: 4px; font-family: "Twemoji Country Flags", var(--font-ui); }
+.stat-button { border: 1px solid transparent; font: inherit; color: inherit; cursor: pointer; }
+.stat-button:hover { border-color: var(--accent); }
+.stat-button.active { border-color: var(--accent); background: var(--accent-soft); }
+.stat-button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.activity-names { margin: -6px 0 16px; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius-sm); }
+.activity-names-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 6px; }
+.name-list { list-style: none; margin: 0; padding: 0; columns: 2 220px; column-gap: 24px; }
+.name-list li { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); break-inside: avoid; }
+.name-list .activity-country { margin-left: 0; }
+.activity-list time { white-space: nowrap; }
+.activity-list + .btn { margin-top: 10px; }
 .pin-history { margin: 4px 0 12px; }
 .pin-history summary { cursor: pointer; font-weight: 600; }
 .pin-changes + .btn { margin-top: 10px; }
