@@ -486,6 +486,72 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .live-panel-head h2 { margin: 0; }
 .live-people { margin: 8px 0 12px; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
 .live-people li { padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); font-size: .9rem; overflow-wrap: anywhere; }
+
+/* The teacher's meter of this month's video minutes (Live class and the Teacher page) */
+.usage-card { margin: 16px 0; }
+.usage-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.usage-head h2 { font-size: 1.1rem; margin: 0; }
+.usage-pct { flex: none; color: var(--accent-dark); font-size: 1.4rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.usage-bar { height: 10px; margin: 8px 0 10px; border-radius: 5px; background: var(--border); overflow: hidden; }
+.usage-bar span { display: block; height: 100%; min-width: 3px; border-radius: 5px; background: var(--accent); }
+.usage-text { margin: 0 0 4px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.usage-card .hint { margin: 0; }
+.usage-card.mid .usage-pct { color: var(--warn); }
+.usage-card.mid .usage-bar span { background: var(--warn); }
+.usage-card.high .usage-pct { color: var(--bad); }
+.usage-card.high .usage-bar span { background: var(--bad); }
+
+/* Live class video call */
+.call-panel { margin-top: 16px; }
+.call-panel[hidden], .call-panel [hidden] { display: none !important; }
+.call-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 8px; }
+.call-head h2 { font-size: 1.2rem; margin: 0; }
+.call-show { margin-right: 0; }
+.call-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.call-btn.is-off { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+.call-status { margin: 8px 0 0; color: var(--muted); }
+.call-status.error { color: var(--bad); }
+/* Three across on a phone, so 11 people fit in four short rows */
+.call-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; margin-top: 12px; }
+@media (min-width: 600px) { .call-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); } }
+.call-tile { position: relative; aspect-ratio: 4 / 3; border-radius: var(--radius-sm); overflow: hidden; background: var(--text); }
+.call-tile video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.call-tile.is-local video { transform: scaleX(-1); } /* your own picture as in a mirror */
+.call-tile.cam-off video { display: none; }
+.call-initial {
+  display: none;
+  position: absolute;
+  inset: 0 0 22px; /* centred above the name */
+  margin: auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--surface);
+  font-size: 1rem;
+  font-weight: 700;
+  align-items: center;
+  justify-content: center;
+}
+.call-tile.cam-off .call-initial { display: flex; }
+.call-label {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  font-size: .8rem;
+}
+.call-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.call-muted { flex: none; font-size: .75rem; }
+.call-others { margin: 8px 0 0; font-size: .9rem; color: var(--muted); overflow-wrap: anywhere; }
+.call-note { margin: 8px 0 0; }
 .teacher-signin { margin-top: 24px; color: var(--muted); }
 .teacher-signin summary { cursor: pointer; font-size: .9rem; }
 .teacher-signin form { margin-top: 8px; }
@@ -851,6 +917,14 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .name-list { list-style: none; margin: 0; padding: 0; columns: 2 220px; column-gap: 24px; }
 .name-list li { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); break-inside: avoid; }
 .name-list .activity-country { margin-left: 0; }
+.invite-list { list-style: none; margin: 0; padding: 0; }
+.invite-list > li { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.invite-list > li:last-child { border-bottom: 0; }
+.invite-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 0; }
+.invite-count { margin-left: auto; padding-left: 12px; font-size: .9rem; }
+.invite-friends { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.invite-friends li { white-space: nowrap; }
+.invite-friends .activity-tag { margin-left: 6px; }
 .activity-list time { white-space: nowrap; }
 .activity-list + .btn { margin-top: 10px; }
 .pin-history { margin: 4px 0 12px; }

@@ -53,6 +53,9 @@
     // meOpen/howOpen: which parts of the board are opened, kept when the board refreshes
     board: { data: null, loading: false, off: false, at: 0, again: false, meOpen: false, howOpen: false },
     loadErrors: [],
+    // The signed-in student's own invite code, for their Share link. off: an
+    // older Google script, or a name it doesn't know, so the plain link.
+    invite: { code: "", forKey: "", loading: false, off: false },
     teacher: {
       passcode: readSetting("hebrewClass.teacherPasscode", ""),
       results: null,
@@ -158,6 +161,7 @@
   function forgetSavedPerson() {
     removeSetting("hebrewClass.liveEmail");
     removeSetting("hebrewClass.liveSession");
+    removeSetting("hebrewClass.liveName");
   }
 
   removeSetting("hebrewClass.studentName"); // earlier versions kept the last name typed, even after signing out
@@ -512,7 +516,11 @@
     return (state.lessonId && findLesson(state.lessonId)) || lessons[0] || null;
   }
 
+  var routedHash = null; // the address onRouteChange last handled
+
   function onRouteChange() {
+    if (location.hash === routedHash) return; // handled already, by goTo
+    routedHash = location.hash;
     state.route = parseHash();
     if (state.route.tab !== openLessonMenu) openLessonMenu = null; // only the Quiz or Word by word button keeps its list open on its own page
     rememberLesson();
@@ -531,6 +539,14 @@
     startLivePolling();
   }
 
+  // Opens another page now, not when the browser gets round to it, so nothing
+  // draws the old page in between (a live class moving lessons keeps its call).
+  function goTo(hash) {
+    if (location.hash === hash) return;
+    location.hash = hash;
+    onRouteChange();
+  }
+
   // Fetch what the current page shows.
   function loadForRoute() {
     var view = state.route.view;
@@ -538,6 +554,8 @@
     if (!signedIn()) return;
     if (view === "home") loadBoard();
     if (view === "suggestions") loadSuggestions();
+    // Ahead of the Share page, so its link is ready (once per browser: it's kept).
+    if (state.student) loadInviteCode();
     if (view === "progress") {
       if (isTeacher()) loadResults(); else loadReport();
     }
@@ -567,6 +585,7 @@
     var title = lesson ? lessonName(lesson) : PAGE_TITLES[view] && t(PAGE_TITLES[view]);
     document.title = (title ? title + " · " : "") + t("Hebrew Class");
     fitSheet();
+    syncCall();
   }
 
   /* ---------- Signing in ---------- */
@@ -592,6 +611,7 @@
     writeSetting("hebrewClass.student", JSON.stringify(state.student));
     state.report.data = null;
     state.wotd = null;
+    state.invite = { code: "", forKey: "", loading: false, off: false };
     resetBoard(); // "Your points" belong to whoever is signed in
   }
 
@@ -614,6 +634,7 @@
     state.report = { data: null, loading: false, error: "" };
     state.quiz = null;
     state.wotd = null;
+    state.invite = { code: "", forKey: "", loading: false, off: false };
     resetBoard();
     forgetMyPoints();
     var t = state.teacher;
@@ -675,9 +696,10 @@
     auth.busy = true;
     auth.error = "";
     render();
-    callBackend({ action: "signIn", name: name, pin: pin, email: email, newPin: newPin || "" }).then(function (res) {
+    callBackend({ action: "signIn", name: name, pin: pin, email: email, newPin: newPin || "", ref: pendingInvite() }).then(function (res) {
       if (res && res.ok) {
         auth.choose = null;
+        removeSetting(INVITE_KEY); // used: the script noted it if this was a first sign-in
         setStudent(res.name || name, res.token);
         done();
       } else if (res && res.error === "choose-pin") {
@@ -688,6 +710,7 @@
         render();
       } else if (res && res.error === "bad-request") {
         // A Google script from before sign-in existed: carry on with the name alone.
+        removeSetting(INVITE_KEY);
         setStudent(name, "");
         done();
       } else {
@@ -695,6 +718,66 @@
       }
     }, function () {
       done(t("Couldn't reach the class service. Check your connection and try again."));
+    });
+  }
+
+  /* ---------- Invites ----------
+     A student's Share link ends in ?ref= and their invite code. A friend who
+     opens it keeps the code on this browser (for up to INVITE_DAYS) until they
+     first sign in; the sign-in sends it, and the Google script notes who
+     invited them. */
+
+  var INVITE_KEY = "hebrewClass.invite";
+  var INVITE_DAYS = 30;
+
+  function keepInvite() {
+    var params;
+    try { params = new URLSearchParams(location.search); } catch (e) { return; }
+    if (!params.has("ref")) return;
+    var code = String(params.get("ref") || "").toLowerCase();
+    // Off the address, so a link copied from it doesn't pass the code on.
+    params.delete("ref");
+    var rest = params.toString();
+    try { history.replaceState(null, "", location.pathname + (rest ? "?" + rest : "") + location.hash); } catch (e) { /* file:// in some browsers */ }
+    // Someone already signed in on this browser is in the class already.
+    if (/^[0-9a-f]{8}$/.test(code) && !signedIn()) writeSetting(INVITE_KEY, JSON.stringify({ code: code, at: Date.now() }));
+  }
+
+  function pendingInvite() {
+    try {
+      var saved = JSON.parse(readSetting(INVITE_KEY, "null"));
+      if (saved && /^[0-9a-f]{8}$/.test(saved.code) && Date.now() - saved.at < INVITE_DAYS * 86400000) return saved.code;
+    } catch (e) { /* ignore */ }
+    return "";
+  }
+
+  // The signed-in student's own code, for the Share page. It never changes for
+  // a name, so this browser keeps it and the page opens straight away next time.
+  var MY_INVITE_KEY = "hebrewClass.myInvite";
+
+  function loadInviteCode() {
+    var inv = state.invite;
+    if (!state.student || !config.resultsUrl || inv.loading) return;
+    var key = studentKey(state.student.name);
+    if (inv.forKey === key && (inv.code || inv.off)) return;
+    inv.forKey = key;
+    inv.code = "";
+    inv.off = false;
+    try {
+      var saved = JSON.parse(readSetting(MY_INVITE_KEY, "null"));
+      if (saved && saved.key === key && /^[0-9a-f]{8}$/.test(saved.code)) { inv.code = saved.code; return; }
+    } catch (e) { /* ask the script */ }
+    inv.loading = true;
+    callBackend(asStudent({ action: "inviteCode" })).then(function (res) {
+      if (res && res.ok && /^[0-9a-f]{8}$/.test(res.code)) {
+        inv.code = res.code;
+        writeSetting(MY_INVITE_KEY, JSON.stringify({ key: key, code: res.code }));
+      } else inv.off = true;
+    }, function () {
+      inv.forKey = ""; // offline: the plain link for now, and it tries again next time
+    }).then(function () {
+      inv.loading = false;
+      if (state.route.view === "share") render();
     });
   }
 
@@ -1018,8 +1101,9 @@
     var tab = view === "lesson" ? state.route.tab : "";
     var inStudy = view === "study" || view === "suggestions" || STUDY_TABS.indexOf(tab) >= 0;
     var lesson = currentLesson();
-    // A running class (known once the Live class page has checked) is where Live class goes.
-    var liveLesson = (live.remote && live.remote.running && findLesson(live.remote.lessonId)) || lesson;
+    // Live class goes to the running class (known once the Live class page has
+    // checked), otherwise to the latest lesson; the teacher can choose another there.
+    var liveLesson = (live.remote && live.remote.running && findLesson(live.remote.lessonId)) || lessons[0] || null;
     nav.appendChild(el("div", { class: "mainnav-inner" }, [
       link("#/", t("Lessons"), view === "home" || tab === "sheet"),
       link(lesson ? lessonUrl(lesson, "cards") : "#/study", t("Self study"), inStudy),
@@ -1245,8 +1329,15 @@
     return !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
   }
 
+  // A signed-in student shares their own link (it ends in their invite code),
+  // so the teacher sees who joined through them. Nothing on the page mentions
+  // it yet. Until the code arrives (it's fetched ahead, see loadInviteCode),
+  // the plain link shows.
   function renderShare() {
-    var url = config.siteUrl || location.href.split("#")[0];
+    var inv = state.invite;
+    var base = config.siteUrl || location.href.split("#")[0].split("?")[0];
+    var own = !!(state.student && inv.code && inv.forKey === studentKey(state.student.name));
+    var url = own ? base + "?ref=" + inv.code : base;
     var message = t(SHARE_TEXT) + " " + url;
     var status = el("span", { class: "share-status", role: "status" });
     function copyLink() {
@@ -1332,11 +1423,14 @@
   // The Quiz and Word by word buttons open their page for the current lesson,
   // with the list of lessons on top. Choosing one opens that lesson there, and
   // the other Self study pages follow it. Returns { button, menu }.
-  function lessonPicker(tab, text, active, current) {
+  // opts.choose, when given, is called with the lesson chosen instead of opening
+  // it (a running live class moves there); opts.title replaces the list's title.
+  function lessonPicker(tab, text, active, current, opts) {
+    opts = opts || {};
     var id = "lesson-menu-" + tab;
     var open = openLessonMenu === tab;
     var menu = el("div", { class: "lesson-menu", id: id, hidden: !open }, [
-      el("p", { class: "lesson-menu-title", text: t("Choose a lesson") }),
+      el("p", { class: "lesson-menu-title", text: opts.title || t("Choose a lesson") }),
       el("ul", null, lessons.map(function (lesson, i) {
         var here = lesson === current;
         return el("li", null, [
@@ -1344,7 +1438,13 @@
             href: lessonUrl(lesson, tab),
             class: here ? "current" : null,
             "aria-current": here ? (active === tab ? "page" : "true") : null,
-            onclick: closeLessonMenus // needed when it's the page already open: the address doesn't change
+            onclick: function (e) {
+              closeLessonMenus(); // needed when it's the page already open: the address doesn't change
+              if (opts.choose && !here) {
+                e.preventDefault();
+                opts.choose(lesson);
+              }
+            }
           }, [
             el("span", { class: "lesson-menu-text" }, [
               el("span", { class: "lesson-menu-number", text: t("Lesson {n}", { n: lesson.number }) + (i === 0 ? " · " + t("Latest") : "") }),
@@ -3020,7 +3120,9 @@
     busy: false,
     seq: 0,
     joinedThisVisit: false,
-    joinedAs: "",
+    joinedAs: readSetting("hebrewClass.liveName", ""), // the name they joined with, which the video call asks for
+    moving: false,         // the teacher is moving the class to another lesson
+    moves: 0,              // counts the starts and ends of moves, so a check from before one isn't used
     timer: null,
     shownKey: ""
   };
@@ -3059,6 +3161,8 @@
 
   function pollLive() {
     var teacher = isLiveTeacher();
+    var moves = live.moves;
+    if (teacher) loadCallUsage(); // every few minutes
     var request = teacher
       ? callBackend({ action: "liveAttendees", passcode: state.teacher.passcode }).then(function (res) {
         if (res && res.ok) live.attendees = res.attendees || [];
@@ -3071,9 +3175,11 @@
       : callBackend({ action: "liveState" });
     request.then(function (res) {
       if (!res || !res.ok) throw new Error("bad reply");
+      if (live.moving || moves !== live.moves) return; // asked before the class moved lessons
       live.remote = res;
       live.error = "";
       if (!res.running) live.teacherIndex = null;
+      if (!teacher) followClass();
     }).catch(function () {
       live.error = t("Couldn't reach the class service. Retrying…");
     }).then(function () {
@@ -3130,6 +3236,60 @@
     });
   }
 
+  // Moves the running class to another lesson, at its first word. It stays the
+  // same class, so everyone who joined stays in it and in the video call, and
+  // their pages follow (followClass).
+  function moveLiveClass(lesson) {
+    var before = live.remote;
+    if (!before || !before.running || before.lessonId === lesson.id || live.moving) return;
+    var back = findLesson(before.lessonId);
+    live.moving = true;
+    live.moves += 1;
+    live.seq = Math.max(Date.now(), live.seq + 1);
+    // Shown at once, and this page opens there before anything draws the old one, so the call carries on.
+    live.remote = { ok: true, running: true, lessonId: lesson.id, index: 0, sessionId: before.sessionId };
+    live.teacherIndex = 0;
+    live.error = "";
+    goTo(lessonUrl(lesson, "live"));
+    function undo(message) {
+      live.remote = before;
+      live.teacherIndex = null;
+      live.error = message;
+      if (back) goTo(lessonUrl(back, "live"));
+    }
+    callBackend({ action: "liveLesson", passcode: state.teacher.passcode, lessonId: lesson.id, seq: live.seq }).then(function (res) {
+      if (res && res.ok) {
+        live.remote = res;
+      } else if (res && res.error === "wrong-passcode") {
+        forgetTeacherPasscode();
+        state.teacher.error = "That passcode didn't work. Check it matches the one in your Google script.";
+      } else if (res && res.error === "not-live") {
+        live.remote = { running: false };
+        live.teacherIndex = null;
+      } else {
+        // bad-request: a Google script from before moving lessons.
+        undo(res && res.error === "bad-request"
+          ? t("Moving the class to another lesson needs the new Google script. Until then, end the class and start it on the other lesson.")
+          : t("Couldn't move the class. Try again."));
+      }
+    }, function () {
+      undo(t("Couldn't reach the class service. Check your connection and try again."));
+    }).then(function () {
+      live.moving = false;
+      live.moves += 1;
+      render();
+    });
+  }
+
+  // A student in the class goes along when the teacher moves it to another lesson.
+  function followClass() {
+    var r = live.remote;
+    if (!r || !r.running || live.joinedSession !== r.sessionId) return;
+    if (state.route.view !== "lesson" || state.route.tab !== "live" || state.route.lessonId === r.lessonId) return;
+    var lesson = findLesson(r.lessonId);
+    if (lesson) goTo(lessonUrl(lesson, "live")); // otherwise the page says to reload for the newest lessons
+  }
+
   function startLiveClass(lesson) {
     live.busy = true;
     render();
@@ -3163,6 +3323,8 @@
         live.remote = { running: false };
         live.teacherIndex = null;
         live.attendees = [];
+        // The meter catches up with the call in about 2 minutes, once Daily and the script have the numbers.
+        usage.at = Math.min(usage.at, Date.now() - USAGE_REFRESH_MS + 150000);
       }
     }, function () {
       live.error = t("Couldn't end the class. Try again.");
@@ -3185,6 +3347,7 @@
         live.email = email;
         writeSetting("hebrewClass.liveEmail", email);
         writeSetting("hebrewClass.liveSession", res.sessionId);
+        writeSetting("hebrewClass.liveName", name);
         boardChanged();
       } else if (res && res.error === "not-live") {
         live.remote = { running: false };
@@ -3256,19 +3419,34 @@
     }
     if (!liveHere(lesson)) {
       var other = r.running && findLesson(r.lessonId);
+      // Before a class, the list opens another lesson to start it on.
+      var picker = lessonPicker("live", t("Change lesson"), "live", lesson);
+      wrap.appendChild(el("div", { class: "subtabs no-print" }, [picker.button, picker.menu]));
+      // With a class running on another lesson (opened from an old link, or Back),
+      // the class can come here, or a new one can start, which ends it.
       wrap.appendChild(el("div", { class: "card live-start" }, [
         el("h2", { text: t("Teach this lesson live") }),
         el("p", { text: t("Start the class, then share this page's link with your students. They join with their name and see whichever word you're on, a few seconds after you move.") }),
-        r.running ? el("p", { class: "notice", text: t("A live class is already running for “{lesson}”. Starting here ends it.", { lesson: other ? lessonName(other) : r.lessonId }) }) : null,
+        r.running ? el("p", { class: "notice", text: t("A live class is running for “{lesson}”. Move it here to keep everyone in it, or start a new class here, which ends it.", { lesson: other ? lessonName(other) : r.lessonId }) }) : null,
         el("div", { class: "actions" }, [
-          el("button", { class: "btn primary", type: "button", disabled: live.busy, onclick: function () { startLiveClass(lesson); }, text: live.busy ? t("Starting…") : t("Start live class") })
+          r.running ? el("button", { class: "btn primary", type: "button", disabled: live.busy || live.moving, onclick: function () { moveLiveClass(lesson); }, text: t("Move the class here") }) : null,
+          el("button", { class: "btn" + (r.running ? "" : " primary"), type: "button", disabled: live.busy || live.moving, onclick: function () { startLiveClass(lesson); }, text: live.busy ? t("Starting…") : r.running ? t("Start a new class") : t("Start live class") })
         ])
       ]));
+      var meter = usageMeter(t);
+      if (meter) wrap.appendChild(meter);
       wrap.appendChild(teacherSignOut());
       return wrap;
     }
 
+    // During the class, the list moves it to another lesson; everyone stays in it.
+    var mover = lessonPicker("live", t("Change lesson"), "live", lesson, {
+      choose: moveLiveClass,
+      title: t("Move the class to another lesson. Everyone who joined stays in it.")
+    });
+    wrap.appendChild(el("div", { class: "subtabs no-print" }, [mover.button, mover.menu]));
     liveCard(lesson, liveIndex(), true).forEach(function (n) { wrap.appendChild(n); });
+    wrap.appendChild(callPanel());
     var people = live.attendees;
     wrap.appendChild(el("div", { class: "card live-panel" }, [
       el("div", { class: "live-panel-head" }, [
@@ -3281,7 +3459,58 @@
       })) : null,
       el("p", { class: "hint", text: t("Use the ← → arrow keys or the buttons to move. Students' screens follow within a few seconds.") })
     ]));
+    var meter = usageMeter(t);
+    if (meter) wrap.appendChild(meter);
     return wrap;
+  }
+
+  /* ---------- Video minutes meter ----------
+     For the teacher, on Live class and the Teacher page: this month's video
+     minutes on the whole Daily account (every call, the test script's too)
+     against Daily's 10,000 free ones, read by the script from Daily's records. */
+
+  var USAGE_REFRESH_MS = 5 * 60000;
+  var usage = { info: null, loading: false, at: 0 }; // info: { minutes, free, since } from the script
+
+  function loadCallUsage() {
+    if (!config.resultsUrl || !state.teacher.passcode || usage.loading || Date.now() - usage.at < USAGE_REFRESH_MS) return;
+    usage.loading = true;
+    var before = JSON.stringify(usage.info);
+    callBackend({ action: "callUsage", passcode: state.teacher.passcode }).then(function (res) {
+      if (res && res.ok) usage.info = { minutes: Number(res.minutes) || 0, free: Number(res.free) || 10000, since: res.since };
+      // No meter without a Daily key, or with a script from before it (bad-request).
+      else if (res && (res.error === "no-video" || res.error === "bad-request")) usage.info = null;
+    }, function () { /* keep the last numbers */ }).then(function () {
+      usage.loading = false;
+      usage.at = Date.now();
+      var onLive = state.route.view === "lesson" && state.route.tab === "live" && isLiveTeacher();
+      if (JSON.stringify(usage.info) !== before && (onTeacherPage() || onLive)) render();
+    });
+  }
+
+  // tr is t on Live class; the Teacher page passes english, as it stays in English.
+  function usageMeter(tr) {
+    var info = usage.info;
+    if (!info) return null;
+    var pct = info.minutes / info.free * 100;
+    // Tenths below 10%, so the first minutes show; never more than the bar can hold.
+    var shown = pct > 0 && pct < 10 ? Math.max(0.1, Math.round(pct * 10) / 10) : Math.round(pct);
+    var level = pct >= 90 ? " high" : pct >= 75 ? " mid" : "";
+    var locale = tr === t ? dateLocale() : undefined;
+    var since = new Date(info.since).toLocaleDateString(locale, { day: "numeric", month: "long", timeZone: "UTC" });
+    return el("div", { class: "card usage-card no-print" + level }, [
+      el("div", { class: "usage-head" }, [
+        el("h2", { text: tr("Video minutes this month") }),
+        el("span", { class: "usage-pct", text: shown.toLocaleString(locale) + "%" })
+      ]),
+      el("div", { class: "usage-bar", "aria-hidden": "true" }, [el("span", { style: "width:" + Math.min(100, pct) + "%" })]),
+      el("p", { class: "usage-text", text: tr("{used} of {free} free minutes", { used: info.minutes.toLocaleString(locale), free: info.free.toLocaleString(locale) }) }),
+      el("p", { class: "hint", text: tr("Since {date}, for every call on your Daily account. Daily charges for minutes above the free ones.", { date: since }) })
+    ]);
+  }
+
+  function english(text, vars) {
+    return vars ? text.replace(/\{(\w+)\}/g, function (m, key) { return key in vars ? String(vars[key]) : m; }) : text;
   }
 
   function teacherSignOut() {
@@ -3312,6 +3541,7 @@
     } else {
       live.joinedThisVisit = true;
       liveCard(lesson, liveIndex(), false).forEach(function (n) { wrap.appendChild(n); });
+      wrap.appendChild(callPanel());
       wrap.appendChild(el("p", { class: "hint live-signed", text: t("Joined as {name}", { name: live.joinedAs || state.studentName }) }));
     }
     return wrap;
@@ -3350,6 +3580,463 @@
     ]);
   }
 
+  /* ---------- Live class video call ----------
+     When the Google script has a Daily key, everyone in the live class is in a
+     video call on the Live class page. The teacher and the first 10 students to
+     join can turn on their camera and see each other; everyone can listen and
+     talk. The page draws the videos itself with Daily's call object, so Show
+     videos can hide them (and stop downloading them) while the sound keeps
+     playing. Students start muted with the camera off; the teacher starts with
+     both on. Leaving the Live class page leaves the call; coming back rejoins. */
+
+  var DAILY_SCRIPT = "https://unpkg.com/@daily-co/daily-js@0.94.0/dist/daily.js";
+
+  // Why there's no call, from the script or from Daily. The class goes on without it.
+  // The script keeps calls within Daily's free minutes (see Code.gs).
+  var CALL_STOPS = {
+    "used-up": "This month's free video minutes are used up, so this class has no video call. Everything else works as usual.",
+    "call-full": "The video call is full. Everything else works as usual.",
+    "meeting-full": "The video call is full. Everything else works as usual.",
+    "time-up": "The video call's time is up for this class. Everything else works as usual.",
+    "exp-room": "The video call's time is up for this class. Everything else works as usual.",
+    "exp-token": "The video call's time is up for this class. Everything else works as usual."
+  };
+
+  var call = {
+    session: "",         // the class session the call is for, "" when there's none
+    status: "",          // "starting", "joined", "failed" or "off" (no call for this class)
+    error: "",           // a problem to show, such as a blocked camera
+    frame: null,         // Daily's call object
+    canVideo: false,     // the teacher, or one of the first students to join
+    seats: 10,           // how many students get video, as the script says
+    endsAt: 0,           // when Daily ends the call
+    shortened: false,    // ended early to stay within the free minutes
+    mic: false,
+    cam: false,
+    showVideos: readSetting("hebrewClass.showVideos", "1") !== "0",
+    soundBlocked: false, // the browser wants a tap before it plays sound
+    asked: {},           // what was last asked of Daily for each person, so it's asked once
+    tiles: {},           // session id -> { box, video, initial, name, muted }
+    audios: {},          // session id -> <audio>
+    audioBox: null,      // outside the page's content, so re-drawing the page never stops the sound
+    leaving: null,       // while the last call closes
+    ui: null             // the panel's elements, kept across renders so the videos keep playing
+  };
+  var dailyLoading = null;
+
+  // The class session this page should be in the call for, or "".
+  function callWanted() {
+    if (state.route.view !== "lesson" || state.route.tab !== "live") return "";
+    var r = live.remote;
+    if (!r || !r.running || r.lessonId !== state.route.lessonId) return "";
+    return isLiveTeacher() || live.joinedSession === r.sessionId ? r.sessionId : "";
+  }
+
+  // Joins or leaves the call to match the page. Runs after every render.
+  function syncCall() {
+    var want = callWanted();
+    if (call.session === want) return;
+    if (call.session) leaveCall();
+    if (want) joinCall(want);
+  }
+
+  function joinCall(session) {
+    call.session = session;
+    call.status = "starting";
+    call.error = "";
+    updateCallPanel();
+    var body = isLiveTeacher()
+      ? { action: "liveCall", passcode: state.teacher.passcode }
+      : { action: "liveCall", name: live.joinedAs || state.studentName, email: live.email, token: state.student ? state.student.token : "" };
+    callBackend(body).then(function (res) {
+      if (call.session !== session) return; // they left meanwhile
+      if (res && res.ok) {
+        return Promise.all([loadDaily(), call.leaving]).then(function () {
+          if (call.session === session) return startDaily(res);
+        });
+      }
+      var error = res && res.error;
+      if (error === "wrong-passcode") {
+        forgetTeacherPasscode();
+        render();
+      } else if (error === "not-joined") {
+        // The script has no join under this name for the class: join again.
+        live.joinedSession = "";
+        removeSetting("hebrewClass.liveSession");
+        render();
+      } else if (error === "bad-request" || error === "no-video" || error === "not-live") {
+        // A script from before the call, no Daily key, or the class just ended.
+        call.status = "off";
+        updateCallPanel();
+      } else if (CALL_STOPS[error]) {
+        pauseCall(t(CALL_STOPS[error]));
+      } else {
+        failCall(error === "wrong-pin" ? t("Sign out and sign in again to use the video call.") : t("The video call couldn't start."));
+      }
+    }).catch(function () {
+      if (call.session === session) failCall(t("The video call couldn't start. Check your connection."));
+    });
+  }
+
+  // daily-js is loaded only for a live class that has the call.
+  function loadDaily() {
+    if (window.Daily || window.DailyIframe) return Promise.resolve();
+    if (!dailyLoading) {
+      dailyLoading = new Promise(function (resolve, reject) {
+        var script = el("script", { src: DAILY_SCRIPT, crossorigin: "anonymous" });
+        script.onload = resolve;
+        script.onerror = function () {
+          dailyLoading = null;
+          script.remove();
+          reject(new Error("daily-js didn't load"));
+        };
+        document.head.appendChild(script);
+      });
+    }
+    return dailyLoading;
+  }
+
+  function startDaily(info) {
+    var Daily = window.Daily || window.DailyIframe;
+    var teacher = isLiveTeacher();
+    var frame = Daily.createCallObject({ subscribeToTracksAutomatically: false });
+    call.frame = frame;
+    call.canVideo = !!info.video;
+    call.seats = info.seats || call.seats;
+    call.endsAt = info.endsAt || 0;
+    call.shortened = !!info.shortened;
+    call.mic = teacher;
+    call.cam = teacher && call.canVideo;
+    // Events from a call this page has since left are ignored.
+    function current(fn) {
+      return function (e) { if (call.frame === frame) fn(e); };
+    }
+    ["participant-joined", "participant-updated", "participant-left", "track-started", "track-stopped"].forEach(function (name) {
+      frame.on(name, current(onCallChange));
+    });
+    frame.on("joined-meeting", current(function () {
+      call.status = "joined";
+      onCallChange();
+    }));
+    frame.on("camera-error", current(function (e) {
+      call.mic = !!frame.localAudio();
+      call.cam = !!frame.localVideo();
+      call.error = deviceError(e && e.error);
+      updateCallPanel();
+    }));
+    frame.on("error", current(function (e) {
+      var type = e && e.error && e.error.type;
+      if (CALL_STOPS[type]) pauseCall(t(CALL_STOPS[type]));
+      else failCall(t("The video call was disconnected."));
+    }));
+    frame.on("left-meeting", current(function () { failCall(t("The video call was disconnected.")); }));
+    return frame.join({ url: info.url, token: info.token, startAudioOff: !call.mic, startVideoOff: !call.cam });
+  }
+
+  function deviceError(error) {
+    var type = (error && error.type) || "";
+    if (type === "permissions") return t("Your browser blocked the camera or microphone. Allow them for this site (the icon next to the address), then try again.");
+    if (type === "not-found") return t("No camera or microphone was found on this device.");
+    if (/in-use/.test(type)) return t("Another app is using the camera or microphone. Close it and try again.");
+    return t("The camera or microphone couldn't start.");
+  }
+
+  // Stays on this class's session, so it isn't tried again by itself: Try again does that.
+  function failCall(message) {
+    var session = call.session;
+    closeCall();
+    call.session = session;
+    call.status = "failed";
+    call.error = message;
+    updateCallPanel();
+  }
+
+  // No call for the rest of this class, and no Try again: it wouldn't help.
+  function pauseCall(message) {
+    failCall(message);
+    call.status = "paused";
+    updateCallPanel();
+  }
+
+  function retryCall() {
+    var session = call.session;
+    closeCall();
+    if (session) joinCall(session);
+  }
+
+  function leaveCall() {
+    closeCall();
+    updateCallPanel();
+  }
+
+  function closeCall() {
+    var frame = call.frame;
+    call.frame = null;
+    call.session = "";
+    call.status = "";
+    call.error = "";
+    call.canVideo = false;
+    call.endsAt = 0;
+    call.shortened = false;
+    call.soundBlocked = false;
+    call.asked = {};
+    Object.keys(call.tiles).forEach(removeTile);
+    Object.keys(call.audios).forEach(removeAudio);
+    if (!frame) return;
+    var closing = Promise.resolve().then(function () { return frame.destroy(); }).catch(function () { /* already gone */ });
+    call.leaving = closing;
+    closing.then(function () { if (call.leaving === closing) call.leaving = null; });
+  }
+
+  // The teacher and the first students to join have "v-" at the start of their call ID (see Code.gs).
+  function hasVideoSeat(p) {
+    return !!p.owner || /^v-/.test(p.user_id || "");
+  }
+
+  function personName(p) {
+    var name = p.owner ? t("Teacher") : p.user_name || "?";
+    return p.local ? name + " " + t("(you)") : name;
+  }
+
+  function micOn(p) {
+    var audio = p.tracks && p.tracks.audio;
+    return !!audio && audio.state !== "off" && audio.state !== "blocked";
+  }
+
+  function videoTrack(p) {
+    var video = p.tracks && p.tracks.video;
+    return video && video.state === "playable" && video.persistentTrack || null;
+  }
+
+  // Everyone's sound, always; videos only for someone with video who has Show videos on.
+  function onCallChange() {
+    var frame = call.frame;
+    if (!frame) return;
+    var people = frame.participants();
+    var here = {};
+    Object.keys(people).forEach(function (k) {
+      var p = people[k];
+      if (p.local) return;
+      var id = p.session_id;
+      here[id] = true;
+      var video = call.canVideo && call.showVideos && hasVideoSeat(p);
+      var ask = video ? "sound+video" : "sound";
+      if (call.asked[id] !== ask) {
+        call.asked[id] = ask;
+        try {
+          frame.updateParticipant(id, { setSubscribedTracks: { audio: true, video: video, screenVideo: false } });
+        } catch (e) { delete call.asked[id]; }
+      }
+      playSound(id, p.tracks && p.tracks.audio);
+    });
+    Object.keys(call.audios).forEach(function (id) { if (!here[id]) removeAudio(id); });
+    Object.keys(call.asked).forEach(function (id) { if (!here[id]) delete call.asked[id]; });
+    updateCallPanel();
+  }
+
+  function playSound(id, track) {
+    var media = track && track.persistentTrack;
+    if (!media) return;
+    var audio = call.audios[id];
+    if (!audio) {
+      if (!call.audioBox) {
+        call.audioBox = el("div", { hidden: true });
+        document.body.appendChild(call.audioBox);
+      }
+      audio = el("audio", { autoplay: true });
+      call.audioBox.appendChild(audio);
+      call.audios[id] = audio;
+    }
+    if (!audio.srcObject || audio.srcObject.getAudioTracks()[0] !== media) {
+      audio.srcObject = new MediaStream([media]);
+      playMedia(audio);
+    }
+  }
+
+  function playMedia(media) {
+    var playing = media.play();
+    if (playing && playing.catch) playing.catch(function (e) {
+      if (e && e.name === "NotAllowedError" && media.tagName === "AUDIO" && !call.soundBlocked) {
+        call.soundBlocked = true;
+        updateCallPanel();
+      }
+    });
+  }
+
+  // A tap lets the browser play the sound it held back after a reload.
+  function unblockSound() {
+    call.soundBlocked = false;
+    Object.keys(call.audios).forEach(function (id) { playMedia(call.audios[id]); });
+    updateCallPanel();
+  }
+
+  function removeAudio(id) {
+    var audio = call.audios[id];
+    audio.srcObject = null;
+    audio.remove();
+    delete call.audios[id];
+  }
+
+  function toggleMic() {
+    if (!call.frame) return;
+    call.mic = !call.mic;
+    call.error = "";
+    call.frame.setLocalAudio(call.mic);
+    if (call.soundBlocked) unblockSound();
+    updateCallPanel();
+  }
+
+  function toggleCam() {
+    if (!call.frame || !call.canVideo) return;
+    call.cam = !call.cam;
+    call.error = "";
+    call.frame.setLocalVideo(call.cam);
+    if (call.soundBlocked) unblockSound();
+    updateCallPanel();
+  }
+
+  function setShowVideos(on) {
+    call.showVideos = on;
+    writeSetting("hebrewClass.showVideos", on ? "1" : "0");
+    if (call.frame) onCallChange(); else updateCallPanel();
+  }
+
+  // The call's card, made once and only updated after that.
+  function callPanel() {
+    if (!call.ui) {
+      var ui = {};
+      ui.title = el("h2");
+      ui.showBox = el("input", { type: "checkbox", onchange: function (e) { setShowVideos(e.target.checked); } });
+      ui.showText = el("span");
+      ui.show = el("label", { class: "toggle call-show" }, [ui.showBox, ui.showText]);
+      ui.mic = el("button", { class: "btn call-btn", type: "button", onclick: toggleMic });
+      ui.cam = el("button", { class: "btn call-btn", type: "button", onclick: toggleCam });
+      ui.sound = el("button", { class: "btn primary", type: "button", onclick: unblockSound });
+      ui.retry = el("button", { class: "btn", type: "button", onclick: retryCall });
+      ui.status = el("p", { class: "call-status", "aria-live": "polite" });
+      ui.grid = el("div", { class: "call-grid" });
+      ui.others = el("p", { class: "call-others" });
+      ui.note = el("p", { class: "hint call-note" });
+      ui.box = el("section", { class: "card call-panel no-print" }, [
+        el("div", { class: "call-head" }, [ui.title, ui.show]),
+        el("div", { class: "call-controls" }, [ui.mic, ui.cam, ui.sound, ui.retry]),
+        ui.status, ui.grid, ui.others, ui.note
+      ]);
+      call.ui = ui;
+    }
+    updateCallPanel();
+    return call.ui.box;
+  }
+
+  function updateCallPanel() {
+    var ui = call.ui;
+    if (!ui) return;
+    var joined = call.status === "joined";
+    var failed = call.status === "failed";
+    var paused = call.status === "paused";
+    ui.box.hidden = call.status === "off";
+    ui.title.textContent = t("Video call");
+    ui.show.hidden = !call.canVideo;
+    ui.showBox.checked = call.showVideos;
+    ui.showText.textContent = t("Show videos");
+    ui.mic.hidden = !joined;
+    ui.mic.textContent = call.mic ? t("Mute") : t("Unmute");
+    ui.mic.classList.toggle("is-off", !call.mic);
+    ui.cam.hidden = !joined || !call.canVideo;
+    ui.cam.textContent = call.cam ? t("Turn camera off") : t("Turn camera on");
+    ui.cam.classList.toggle("is-off", !call.cam);
+    ui.sound.hidden = !joined || !call.soundBlocked;
+    ui.sound.textContent = t("Turn on sound");
+    ui.retry.hidden = !failed;
+    ui.retry.textContent = t("Try again");
+    var status = call.error || (joined || failed || paused ? "" : t("Connecting to the video call…"));
+    if (!call.error && joined && call.shortened && call.endsAt) {
+      var time = new Date(call.endsAt).toLocaleTimeString(dateLocale(), { hour: "numeric", minute: "2-digit" });
+      status = t("To stay within this month's free minutes, the video call ends at {time}.", { time: time });
+    }
+    ui.status.textContent = status;
+    ui.status.hidden = !status;
+    ui.status.classList.toggle("error", !!call.error && !paused);
+
+    var people = joined && call.frame ? call.frame.participants() : {};
+    var list = Object.keys(people).map(function (k) { return people[k]; });
+    var withVideo = list.filter(hasVideoSeat).sort(function (a, b) {
+      if (!!a.owner !== !!b.owner) return a.owner ? -1 : 1;
+      return joinedAt(a) - joinedAt(b);
+    });
+    var showGrid = joined && call.canVideo && call.showVideos;
+    ui.grid.hidden = !showGrid;
+    if (showGrid) updateTiles(withVideo);
+    else Object.keys(call.tiles).forEach(removeTile);
+    // The people not in the grid, by name.
+    var others = list.filter(function (p) { return !p.local && (!showGrid || !hasVideoSeat(p)); }).map(personName);
+    ui.others.textContent = others.length ? t(showGrid ? "Sound only: {names}" : "In the call: {names}", { names: others.join(", ") }) : "";
+    ui.others.hidden = !others.length;
+    ui.note.textContent = t("Video is for your teacher and the first {n} students to join. You can still listen and talk.", { n: call.seats });
+    ui.note.hidden = !joined || call.canVideo;
+  }
+
+  function joinedAt(p) {
+    return p.joined_at ? new Date(p.joined_at).getTime() : 0;
+  }
+
+  function updateTiles(list) {
+    var grid = call.ui.grid;
+    var keep = {};
+    list.forEach(function (p, i) {
+      var id = p.session_id;
+      keep[id] = true;
+      var tile = call.tiles[id] || makeTile(id);
+      var track = videoTrack(p);
+      var video = tile.video;
+      if (track) {
+        if (!video.srcObject || video.srcObject.getVideoTracks()[0] !== track) video.srcObject = new MediaStream([track]);
+        if (video.paused) playMedia(video);
+      } else if (video.srcObject) {
+        video.srcObject = null;
+      }
+      var name = personName(p);
+      tile.box.classList.toggle("cam-off", !track);
+      tile.box.classList.toggle("is-local", !!p.local);
+      tile.initial.textContent = name.charAt(0).toUpperCase();
+      tile.name.textContent = name;
+      tile.muted.hidden = micOn(p);
+      tile.muted.setAttribute("aria-label", t("Microphone off"));
+      tile.muted.title = t("Microphone off");
+      if (grid.children[i] !== tile.box) grid.insertBefore(tile.box, grid.children[i] || null);
+    });
+    Object.keys(call.tiles).forEach(function (id) { if (!keep[id]) removeTile(id); });
+  }
+
+  function makeTile(id) {
+    var video = el("video", { autoplay: true, playsinline: true, muted: true });
+    video.muted = true; // the sound plays from its own element, so hiding videos keeps it
+    var tile = {
+      video: video,
+      initial: el("span", { class: "call-initial", "aria-hidden": "true" }),
+      name: el("span", { class: "call-name" }),
+      muted: el("span", { class: "call-muted", role: "img", text: "🔇" })
+    };
+    tile.box = el("div", { class: "call-tile" }, [video, tile.initial, el("span", { class: "call-label" }, [tile.muted, tile.name])]);
+    call.tiles[id] = tile;
+    return tile;
+  }
+
+  function removeTile(id) {
+    var tile = call.tiles[id];
+    tile.video.srcObject = null;
+    tile.box.remove();
+    delete call.tiles[id];
+  }
+
+  // Closing or leaving the page leaves the call straight away; coming back to it rejoins.
+  window.addEventListener("pagehide", function () {
+    if (call.frame) call.frame.leave();
+  });
+  window.addEventListener("pageshow", function (e) {
+    if (e.persisted && call.session) retryCall();
+  });
+
   /* ---------- Teacher dashboard ---------- */
 
   function loadResults() {
@@ -3358,6 +4045,7 @@
     var rejected = false;
     t.loading = true;
     loadTeacherBoard();
+    loadCallUsage(); // every few minutes
     callBackend({ action: "list", passcode: t.passcode }).then(function (res) {
       if (res && res.ok) {
         t.results = res.results || [];
@@ -3526,6 +4214,8 @@
     if (!t.results) return wrap;
 
     wrap.appendChild(renderSuggestionsCard());
+    var meter = usageMeter(english);
+    if (meter) wrap.appendChild(meter);
     if (!t.results.length && !t.practice.length && !t.students.length) {
       wrap.appendChild(el("p", { class: "notice", text: "No students yet. They appear here as soon as someone signs in, finishes a quiz or practises the word of the day." }));
       return wrap;
@@ -3534,6 +4224,7 @@
     wrap.appendChild(renderWeekCard(t));
     if (t.report) wrap.appendChild(renderStudentReport(t));
     wrap.appendChild(renderBoardCard(t));
+    wrap.appendChild(renderInvitesCard(t));
     if (t.results.length) {
       wrap.appendChild(renderScoreGrid(t));
       if (t.selected) wrap.appendChild(renderAttempts(t));
@@ -3933,7 +4624,9 @@
       if (isNaN(date) || !name) return;
       items.push({ kind: kind, at: date, student: name, tag: tag, detail: detail, result: result || null });
     }
-    t.students.forEach(function (s) { add("signin", s.joinedAt, s.name, "New student", "First sign-in"); });
+    t.students.forEach(function (s) {
+      add("signin", s.joinedAt, s.name, "New student", "First sign-in" + (s.invitedBy ? " · invited by " + s.invitedBy.trim() : ""));
+    });
     (t.signIns || []).forEach(function (s) { add("signin", s.at, s.student, "Signed in", ""); });
     t.results.forEach(function (r) {
       var lesson = findLesson(r.lessonId);
@@ -4097,6 +4790,70 @@
     ]);
   }
 
+  /* ---------- Invites ---------- */
+
+  // Who brought whom with their Share link, for rewarding students who invite
+  // friends. A friend is active once they've taken a quiz, practised the Word
+  // of the day or joined a live class; test names are listed but not counted.
+  function renderInvitesCard(t) {
+    var head = [
+      el("h2", { text: "Invites" }),
+      el("p", { class: "hint", text: "Friends who signed up for the first time with a student's own link from the Share page. Active: took a quiz, practised the Word of the day or joined a live class. Names with “test” in them aren't counted." })
+    ];
+    // A Google script from before invites sends no invitedBy at all.
+    if (t.students.length && !t.students.some(function (s) { return "invitedBy" in s; })) {
+      return el("div", { class: "card dash-card" }, head.concat([el("p", { class: "notice", text: "To record invites, paste the new results-sheet/Code.gs into your Google script and deploy a new version (Deploy → Manage deployments → Edit → Version: New version)." })]));
+    }
+    var byEmail = studentEmails(t);
+    var did = {};
+    t.results.forEach(function (r) { did[studentKey(r.student)] = true; });
+    t.practice.forEach(function (p) { did[studentKey(p.student)] = true; });
+    (t.classNames || (t.classes || []).map(function (c) { return c.student; })).forEach(function (name) {
+      did[studentKey(byEmail[studentKey(name)] || name)] = true;
+    });
+    var groups = {};
+    t.students.forEach(function (s) {
+      var inviter = String(s.invitedBy || "").trim();
+      if (!inviter) return;
+      var key = studentKey(inviter);
+      var g = groups[key] || (groups[key] = { key: key, name: inviter, friends: [], joined: 0, active: 0 });
+      var name = String(s.name).trim();
+      var friend = { name: name, active: !!did[studentKey(name)], test: isTestName(name) };
+      g.friends.push(friend);
+      if (!friend.test) {
+        g.joined += 1;
+        if (friend.active) g.active += 1;
+      }
+    });
+    var list = Object.keys(groups).map(function (key) { return groups[key]; }).sort(function (a, b) {
+      return b.active - a.active || b.joined - a.joined || a.name.localeCompare(b.name);
+    });
+    if (!list.length) {
+      return el("div", { class: "card dash-card" }, head.concat([el("p", { class: "notice", text: "No one has signed up with a classmate's link yet. Each student finds their own link on the Share page." })]));
+    }
+    var places = studentPlaces(t);
+    return el("div", { class: "card dash-card" }, head.concat([
+      el("ul", { class: "invite-list" }, list.map(function (g) {
+        return el("li", null, [
+          el("div", { class: "invite-head" }, [
+            el("strong", { text: g.name }),
+            countryLabel(places[g.key]),
+            el("span", { class: "muted invite-count", text: g.joined + (g.joined === 1 ? " friend joined" : " friends joined") + " · " + g.active + " active" })
+          ]),
+          el("ul", { class: "invite-friends" }, g.friends.map(function (f) {
+            return el("li", null, [
+              f.name,
+              el("span", {
+                class: "activity-tag" + (f.active && !f.test ? " new" : ""),
+                text: f.test ? "Test name, not counted" : f.active ? "Active" : "Not active yet"
+              })
+            ]);
+          }))
+        ]);
+      }))
+    ]));
+  }
+
   // The class's numbers, then everything students did, newest first, with a
   // filter by kind and "Show more".
   function renderActivityCard(t) {
@@ -4224,6 +4981,7 @@
   window.addEventListener("beforeprint", fitSheet);
 
   document.addEventListener("DOMContentLoaded", function () {
+    keepInvite();
     loadLessons(function () {
       lessons.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
       state.route = parseHash();

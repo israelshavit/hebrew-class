@@ -31,16 +31,20 @@ function doPost(e) {
   if (data.action === "pinOptions") return pinOptions(data);
   if (data.action === "pinCode") return sendPinCode(data);
   if (data.action === "pinCodeReset") return resetPinWithCode(data);
+  if (data.action === "inviteCode") return inviteCode(data);
   if (data.action === "translate") return translate(data);
   if (data.action === "board") return board(data);
   if (data.action === "boardHide") return boardHide(data);
   if (data.action === "liveState") return reply(liveReply(liveState()));
   if (data.action === "liveJoin") return liveJoin(data);
-  if (data.action === "liveStart" || data.action === "liveSet" || data.action === "liveEnd" || data.action === "liveAttendees") {
+  if (data.action === "liveCall") return liveCall(data);
+  if (data.action === "liveStart" || data.action === "liveSet" || data.action === "liveLesson" || data.action === "liveEnd" || data.action === "liveAttendees" || data.action === "callUsage") {
     if (!isTeacher(data)) return reply({ ok: false, error: "wrong-passcode" });
     if (data.action === "liveStart") return liveStart(data);
     if (data.action === "liveSet") return liveSet(data);
+    if (data.action === "liveLesson") return liveLesson(data);
     if (data.action === "liveEnd") return liveEnd();
+    if (data.action === "callUsage") return callUsage();
     return liveAttendees();
   }
   return saveResult(data);
@@ -90,7 +94,9 @@ function liveStart(data) {
   if (!lessonId) return reply({ ok: false, error: "bad-request" });
   var now = Date.now();
   var live = { running: true, lessonId: lessonId, index: 0, seq: 0, startedAt: now, sessionId: String(now) };
-  withLock(function () { saveLive(live); });
+  var old;
+  withLock(function () { old = liveState(); saveLive(live); });
+  deleteRoom(old); // a class that was still running loses its call
   return reply(liveReply(live));
 }
 
@@ -109,8 +115,35 @@ function liveSet(data) {
   return reply(liveReply(live));
 }
 
+// Moves the running class to another lesson, at its first word. It stays the
+// same class, so everyone who joined stays in it and in its video call. Lesson
+// changes are ordered by their own seq, so one that arrives after a later word
+// change still moves the lesson, but leaves that word in place.
+function liveLesson(data) {
+  var lessonId = safe(data.lessonId, 80);
+  if (!lessonId) return reply({ ok: false, error: "bad-request" });
+  var live;
+  withLock(function () {
+    live = liveState();
+    var seq = Number(data.seq) || 0;
+    if (live.running && seq >= (live.lessonSeq || 0)) {
+      live.lessonId = lessonId;
+      live.lessonSeq = seq;
+      if (seq >= (live.seq || 0)) {
+        live.index = 0;
+        live.seq = seq;
+      }
+      saveLive(live);
+    }
+  });
+  if (!live.running) return reply({ ok: false, error: "not-live" });
+  return reply(liveReply(live));
+}
+
 function liveEnd() {
-  withLock(function () { saveLive({ running: false }); });
+  var old;
+  withLock(function () { old = liveState(); saveLive({ running: false }); });
+  deleteRoom(old);
   return reply({ ok: true, running: false });
 }
 
@@ -147,6 +180,309 @@ function liveAttendees() {
   return reply({ ok: true, running: true, attendees: attendees });
 }
 
+/* ---------- Live class video call ----------
+   With a Daily API key in the script properties (DAILY_API_KEY, see README.md),
+   each live class gets a private Daily room, made when the first person opens
+   the call and deleted when the class ends. Everyone who joined the class gets
+   their own token for it: the teacher and the first VIDEO_SEATS students to
+   join can send video and sound, everyone after them sound only. Without a key
+   the class runs as before, with no call.
+
+   Daily has no spending limit, so the script keeps its own: a call takes at
+   most CALL_MAX_PEOPLE people for at most CALL_MAX_MINUTES, and before making
+   a room it checks the minutes used in the last 32 days (any billing month
+   fits inside that) and shortens the call, or leaves it out, so the total
+   can't pass CALL_MINUTES_LIMIT. Each call first counts as its most
+   (people × minutes); once Daily has the numbers, it counts what it really used. */
+
+var VIDEO_SEATS = 10;          // students with video, besides the teacher
+// Daily's 10,000 free participant minutes a month, less room for test calls. Both scripts share
+// one Daily account but count only their own calls, so the test script gets a script property
+// CALL_MINUTES_LIMIT of 600 (see README.md): 9,000 + 600 stays under 10,000.
+var CALL_MINUTES_LIMIT = 9000;
+var CALL_MAX_PEOPLE = 20;      // in the call at once, teacher included (Daily counts the teacher's minutes too)
+var CALL_MAX_MINUTES = 60;     // the longest a call lasts, from the class's first call
+var CALL_MIN_MINUTES = 15;     // with less than this left, the class has no call
+var CALL_LEDGER = "callLedger"; // script property: the calls of the last 32 days
+var LEDGER_DAYS = 32;
+var DAILY_API = "https://api.daily.co/v1/";
+
+function dailyKey() {
+  return PropertiesService.getScriptProperties().getProperty("DAILY_API_KEY") || "";
+}
+
+// The minutes this script may use in 32 days: the CALL_MINUTES_LIMIT script property when set, never more than the default.
+function callMinutesLimit() {
+  var raw = String(PropertiesService.getScriptProperties().getProperty("CALL_MINUTES_LIMIT") || "").trim();
+  var set = raw === "" ? NaN : Number(raw);
+  return set >= 0 && set < CALL_MINUTES_LIMIT ? set : CALL_MINUTES_LIMIT;
+}
+
+var dailyError = ""; // why the last request to Daily failed, for checkDaily
+
+// One request to Daily: its reply, or null if it failed (the reason goes to the script's log).
+function daily(method, path, payload) {
+  var key = dailyKey();
+  if (!key) return null;
+  dailyError = "";
+  var options = { method: method, headers: { Authorization: "Bearer " + key }, muteHttpExceptions: true };
+  if (payload) {
+    options.contentType = "application/json";
+    options.payload = JSON.stringify(payload);
+  }
+  try {
+    var res = UrlFetchApp.fetch(DAILY_API + path, options);
+    var code = res.getResponseCode();
+    if (code >= 200 && code < 300) return JSON.parse(res.getContentText() || "{}");
+    dailyError = code + " " + res.getContentText().slice(0, 300);
+  } catch (err) {
+    dailyError = String(err);
+  }
+  console.error("Daily " + method + " " + path + ": " + dailyError);
+  return null;
+}
+
+// Run this once from the Apps Script editor after adding DAILY_API_KEY. Google
+// asks you to allow the script to connect to Daily; then it makes a test room
+// and deletes it again, as a live class will.
+function checkDaily() {
+  if (!dailyKey()) throw new Error("Add DAILY_API_KEY under Project Settings → Script properties first.");
+  var room = daily("post", "rooms", roomSettings("check-" + Utilities.getUuid().slice(0, 8), Math.floor(Date.now() / 1000) + 600));
+  if (!room || !room.name) {
+    throw new Error("Daily couldn't make a room. If the key is right (Daily dashboard → Developers), Daily may need a card on the account. Daily said: " + dailyError);
+  }
+  daily("delete", "rooms/" + encodeURIComponent(room.name));
+  Logger.log("Daily is connected. The next live class will have the video call.");
+  Logger.log("Video minutes counted in the last " + LEDGER_DAYS + " days: " + ledgerMinutes(readLedger()) + " of " + callMinutesLimit() + ".");
+  var month = monthMinutes(monthStart());
+  Logger.log(month === null
+    ? "Couldn't read this month's minutes from Daily. Daily said: " + dailyError
+    : "Video minutes on the whole Daily account this month: " + month + " of " + DAILY_FREE_MINUTES + " free.");
+}
+
+/* The teacher's meter: participant minutes on the whole Daily account since the
+   1st of this month, against Daily's free minutes. It counts every call on the
+   account (the test script's too), from Daily's own meeting records. */
+
+var DAILY_FREE_MINUTES = 10000; // free each calendar month; Daily charges for every minute above
+
+// The 1st of this month at midnight UTC, in milliseconds.
+function monthStart() {
+  var now = new Date();
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+}
+
+// Kept for 2 minutes, so the teacher's pages don't ask Daily each time they refresh.
+function callUsage() {
+  if (!dailyKey()) return reply({ ok: false, error: "no-video" });
+  var since = monthStart();
+  var cache = CacheService.getScriptCache();
+  var cacheKey = "callUsage|" + since;
+  var kept = cache.get(cacheKey);
+  var minutes = kept !== null ? Number(kept) : monthMinutes(since);
+  if (minutes === null) return reply({ ok: false, error: "video-failed" });
+  if (kept === null) cache.put(cacheKey, String(minutes), 120);
+  return reply({ ok: true, minutes: minutes, free: DAILY_FREE_MINUTES, since: since });
+}
+
+// Every participant's minutes in the meetings since `since` (milliseconds), a
+// minute started counting as a whole one; null if Daily didn't answer.
+function monthMinutes(since) {
+  var start = Math.floor(since / 1000);
+  var minutes = 0;
+  var after = "";
+  for (var page = 0; page < 50; page++) {
+    var res = daily("get", "meetings?timeframe_start=" + start + "&limit=100" + (after ? "&starting_after=" + encodeURIComponent(after) : ""));
+    if (!res || !res.data) return null;
+    res.data.forEach(function (meeting) {
+      if (Number(meeting.start_time) < start) return; // in case Daily sends older ones too
+      (meeting.participants || []).forEach(function (p) {
+        minutes += Math.ceil((Number(p.duration) || 0) / 60);
+      });
+    });
+    if (res.data.length < 100) break;
+    after = res.data[res.data.length - 1].id;
+  }
+  return minutes;
+}
+
+// A private room that throws everyone out at exp (unix seconds) and takes at most CALL_MAX_PEOPLE.
+function roomSettings(name, exp) {
+  return {
+    name: name,
+    privacy: "private",
+    properties: {
+      exp: exp,
+      eject_at_room_exp: true,
+      max_participants: CALL_MAX_PEOPLE,
+      enable_chat: false,
+      enable_screenshare: false
+    }
+  };
+}
+
+// The calls of the last 32 days: [{ name, at, minutes, settled }].
+function readLedger() {
+  var raw = PropertiesService.getScriptProperties().getProperty(CALL_LEDGER);
+  var since = Date.now() - LEDGER_DAYS * 86400000;
+  return (raw ? JSON.parse(raw) : []).filter(function (entry) { return entry.at > since; });
+}
+
+function saveLedger(list) {
+  PropertiesService.getScriptProperties().setProperty(CALL_LEDGER, JSON.stringify(list));
+}
+
+function ledgerMinutes(list) {
+  return list.reduce(function (sum, entry) { return sum + entry.minutes; }, 0);
+}
+
+// The participant minutes a room used, from Daily's meeting records, or null
+// when Daily has none for it yet. A minute started counts as a whole one.
+function roomUsage(name) {
+  var res = daily("get", "meetings?room=" + encodeURIComponent(name));
+  if (!res || !res.data || !res.data.length) return null;
+  var usage = { minutes: 0, ongoing: false };
+  res.data.forEach(function (meeting) {
+    if (meeting.ongoing) usage.ongoing = true;
+    (meeting.participants || []).forEach(function (p) {
+      usage.minutes += Math.ceil((Number(p.duration) || 0) / 60) + (meeting.ongoing ? 1 : 0);
+    });
+  });
+  return usage;
+}
+
+// Swaps each call's "at most" for what it really used, once that's known. The
+// room named ending is being closed, so its numbers so far are its last.
+function settleCalls(list, ending) {
+  list.forEach(function (entry) {
+    if (entry.settled) return;
+    var usage = roomUsage(entry.name);
+    if (!usage || (usage.ongoing && entry.name !== ending)) return;
+    entry.minutes = Math.min(entry.minutes, usage.minutes);
+    entry.settled = true;
+  });
+}
+
+// When the class ends its call has to go too, or it would stay open until it expires.
+function deleteRoom(live) {
+  if (!live || !live.room) return;
+  var name = live.room.name;
+  withLock(function () {
+    var list = readLedger();
+    settleCalls(list.filter(function (entry) { return entry.name === name; }), name);
+    saveLedger(list);
+  });
+  daily("delete", "rooms/" + encodeURIComponent(name));
+}
+
+// The running class's room, made the first time someone asks for it:
+// { room } or { error: "used-up" | "video-failed" }.
+function liveRoom() {
+  var live = liveState();
+  if (live.room) return { room: live.room };
+  if (live.noCall) return { error: live.noCall };
+  var result = { error: "video-failed" };
+  withLock(function () {
+    live = liveState(); // someone else may have made it while this one waited
+    if (!live.running) return;
+    if (live.room) { result = { room: live.room }; return; }
+    if (live.noCall) { result = { error: live.noCall }; return; }
+    var list = readLedger();
+    settleCalls(list);
+    var left = callMinutesLimit() - ledgerMinutes(list);
+    var minutes = Math.min(CALL_MAX_MINUTES, Math.floor(left / CALL_MAX_PEOPLE));
+    if (minutes < CALL_MIN_MINUTES) {
+      live.noCall = "used-up"; // asked once per class, not by every student
+      saveLive(live);
+      result = { error: "used-up" };
+    } else {
+      var exp = Math.floor(Date.now() / 1000) + minutes * 60;
+      var made = daily("post", "rooms", roomSettings("class-" + live.sessionId + "-" + Utilities.getUuid().slice(0, 8), exp));
+      if (made && made.name && made.url) {
+        list.push({ name: made.name, at: Date.now(), minutes: minutes * CALL_MAX_PEOPLE, settled: false });
+        live.room = { name: made.name, url: made.url, exp: exp, shortened: minutes < CALL_MAX_MINUTES };
+        saveLive(live);
+        result = { room: live.room };
+      }
+    }
+    saveLedger(list);
+  });
+  return result;
+}
+
+// Where a student comes among the people who joined the running class (0 for
+// the first), counted as liveAttendees does, or -1 if they haven't joined.
+function liveSeat(live, name, email) {
+  var key = nameKey(name);
+  email = String(email || "").trim().toLowerCase();
+  var seen = {};
+  var place = 0;
+  var rows = attendanceSheet().getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][3]) !== live.sessionId) continue;
+    var rowEmail = String(rows[i][1] || "").replace(/^'/, "");
+    var rowName = String(rows[i][4] || "").replace(/^'/, "");
+    var rowKey = rowEmail || rowName.toLowerCase();
+    if (!rowKey || seen[rowKey]) continue;
+    seen[rowKey] = true;
+    if ((email && rowEmail === email) || nameKey(rowName) === key) return place;
+    place++;
+  }
+  return -1;
+}
+
+// The call for the teacher, or for a student who joined the running class:
+// the room's address and their own token, and whether they can send video.
+function liveCall(data) {
+  var live = liveState();
+  if (!live.running) return reply({ ok: false, error: "not-live" });
+  if (!dailyKey()) return reply({ ok: false, error: "no-video" });
+  var who;
+  if (data.passcode) {
+    if (!isTeacher(data)) return reply({ ok: false, error: "wrong-passcode" });
+    who = { key: "teacher", name: "Teacher", video: true, owner: true };
+  } else {
+    var name = cleanName(data.name);
+    if (!name) return reply({ ok: false, error: "bad-name" });
+    if (!studentAllowed(name, data.token)) return reply({ ok: false, error: "wrong-pin" });
+    var seat = liveSeat(live, name, data.email);
+    if (seat < 0) return reply({ ok: false, error: "not-joined" });
+    if (seat >= CALL_MAX_PEOPLE - 1) return reply({ ok: false, error: "call-full" }); // one place is the teacher's
+    who = { key: nameKey(name) + "|" + String(data.email || "").trim().toLowerCase().slice(0, 120), name: name, video: seat < VIDEO_SEATS, owner: false };
+  }
+  var found = liveRoom();
+  if (found.error) return reply({ ok: false, error: found.error });
+  var room = found.room;
+  if (room.exp * 1000 <= Date.now()) return reply({ ok: false, error: "time-up" });
+  // A token is kept for the class, so reloading the page doesn't ask Daily again.
+  var cache = CacheService.getScriptCache();
+  var cacheKey = "callToken|" + room.name + "|" + who.key;
+  var token = cache.get(cacheKey);
+  if (!token) {
+    var made = daily("post", "meeting-tokens", {
+      properties: {
+        room_name: room.name,
+        user_name: who.name,
+        // "v-" marks someone with video, so every page knows whose picture to show.
+        user_id: (who.video ? "v-" : "a-") + sha(secret() + "|call|" + who.key).slice(0, 20),
+        is_owner: who.owner,
+        exp: room.exp,
+        start_audio_off: !who.owner,
+        start_video_off: !who.owner,
+        enable_screenshare: false,
+        permissions: { canSend: who.video ? ["audio", "video"] : ["audio"] }
+      }
+    });
+    if (!made || !made.token) return reply({ ok: false, error: "video-failed" });
+    token = made.token;
+    cache.put(cacheKey, token, 21600);
+  }
+  return reply({
+    ok: true, url: room.url, token: token, video: who.video, seats: VIDEO_SEATS, sessionId: live.sessionId,
+    endsAt: room.exp * 1000, shortened: !!room.shortened // shortened: the minutes left this month end it early
+  });
+}
+
 function attendanceSheet() {
   var s = namedSheet(ATTENDANCE_SHEET, ATTENDANCE_HEADERS);
   if (s.getLastColumn() < ATTENDANCE_HEADERS.length) {
@@ -173,7 +509,7 @@ function withLock(fn) {
 
 var STUDENTS_SHEET = "Students";
 // Newer columns go last so sheets made before them keep their columns.
-var STUDENTS_HEADERS = ["Joined", "Name", "Key", "PIN", "Email", "Country", "Time zone"];
+var STUDENTS_HEADERS = ["Joined", "Name", "Key", "PIN", "Email", "Country", "Time zone", "Invited by"];
 var PIN_TRIES = 5; // wrong PINs allowed before a pause
 var PIN_PAUSE_SECONDS = 600;
 var TEMP_PIN_PREFIX = "Temporary: ";
@@ -272,6 +608,8 @@ function signIn(data) {
   if (newPin && !/^\d{4,8}$/.test(newPin)) return reply({ ok: false, error: "bad-pin" });
   var email = String(data.email || "").trim().toLowerCase().slice(0, 120);
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return reply({ ok: false, error: "bad-email" });
+  var ref = String(data.ref || "").trim().toLowerCase(); // from a classmate's Share link
+  if (!/^[0-9a-f]{8}$/.test(ref)) ref = "";
 
   var cache = CacheService.getScriptCache();
   var triesKey = "pinTries:" + sha(key);
@@ -285,7 +623,8 @@ function signIn(data) {
     if ((!student || !student.pin) && pin && !/^\d{4,8}$/.test(pin)) {
       out = { ok: false, error: "bad-pin" };
     } else if (!student) {
-      studentsSheet().appendRow([new Date(), safe(name, 60), safe(key, 60), hash, safe(email, 120)]);
+      var invitedBy = ref ? inviterOf(ref, key) : "";
+      studentsSheet().appendRow([new Date(), safe(name, 60), safe(key, 60), hash, safe(email, 120), "", "", safe(invitedBy, 60)]);
       if (pin) logPin(name, "Chose a PIN");
       out = { ok: true, name: name, created: true, hasPin: !!pin, token: pin ? tokenFor(key, hash) : "" };
     } else if (!student.pin) {
@@ -323,6 +662,34 @@ function signIn(data) {
     if (out.ok && student) logSignIn(student.name);
   });
   return reply(out);
+}
+
+/* ---------- Invites ----------
+   Each student's Share link ends in ?ref= and their invite code, made from
+   their name so nothing new is stored. A friend who signs up for the first
+   time through it gets the student's name in "Invited by" on Students. */
+
+function inviteCodeOf(key) {
+  return sha(secret() + "|invite|" + key).slice(0, 8);
+}
+
+// The student whose invite code this is, or "" (not someone inviting themselves).
+function inviterOf(code, newKey) {
+  var rows = studentsSheet().getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    var key = String(rows[i][2]).replace(/^'/, "");
+    if (key && key !== newKey && inviteCodeOf(key) === code) return String(rows[i][1]).replace(/^'/, "");
+  }
+  return "";
+}
+
+// A signed-in student's own invite code, for their Share link.
+function inviteCode(data) {
+  var key = nameKey(data.name);
+  if (!key) return reply({ ok: false, error: "bad-request" });
+  if (!studentAllowed(data.name, data.token)) return reply({ ok: false, error: "sign-in" });
+  if (!findStudent(key)) return reply({ ok: false, error: "not-found" });
+  return reply({ ok: true, code: inviteCodeOf(key) });
 }
 
 /* ---------- Sign-ins ----------
@@ -606,7 +973,7 @@ function listResults(data) {
   if (!isTeacher(data)) return reply({ ok: false, error: "wrong-passcode" });
   var students = dataRows(studentsSheet()).map(function (r) {
     return { name: unsafe(r[1]), joinedAt: isoDate(r[0]), hasPin: !!r[3], tempPinSent: !!tempPinOf(r[3]), email: unsafe(r[4]),
-      country: unsafe(r[5]), countryCode: countryCode(unsafe(r[5])), timeZone: unsafe(r[6]) };
+      country: unsafe(r[5]), countryCode: countryCode(unsafe(r[5])), timeZone: unsafe(r[6]), invitedBy: unsafe(r[7]) };
   });
   var pinChanges = dataRows(namedSheet(PIN_LOG_SHEET, PIN_LOG_HEADERS)).map(function (r) {
     return { at: isoDate(r[0]), student: unsafe(r[1]), change: unsafe(r[2]) };
