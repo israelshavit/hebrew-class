@@ -615,6 +615,7 @@
     state.report.data = null;
     state.wotd = null;
     state.invite = { code: "", forKey: "", loading: false, off: false };
+    setAddressRef(""); // their own code goes on once it's known
     resetBoard(); // "Your points" belong to whoever is signed in
   }
 
@@ -638,6 +639,7 @@
     state.quiz = null;
     state.wotd = null;
     state.invite = { code: "", forKey: "", loading: false, off: false };
+    setAddressRef(""); // the next person on this browser doesn't get this student's code
     resetBoard();
     forgetMyPoints();
     var t = state.teacher;
@@ -738,12 +740,29 @@
     try { params = new URLSearchParams(location.search); } catch (e) { return; }
     if (!params.has("ref")) return;
     var code = String(params.get("ref") || "").toLowerCase();
-    // Off the address, so a link copied from it doesn't pass the code on.
-    params.delete("ref");
-    var rest = params.toString();
-    try { history.replaceState(null, "", location.pathname + (rest ? "?" + rest : "") + location.hash); } catch (e) { /* file:// in some browsers */ }
+    // Off the address, so a link copied from it doesn't pass the code on
+    // (a signed-in student's own code goes back on, see showInviteInAddress).
+    setAddressRef("");
     // Someone already signed in on this browser is in the class already.
     if (/^[0-9a-f]{8}$/.test(code) && !signedIn()) writeSetting(INVITE_KEY, JSON.stringify({ code: code, at: Date.now() }));
+  }
+
+  // A signed-in student's address carries their own code too, so a link they
+  // copy from the address bar (a lesson, say) counts like their Share link.
+  function showInviteInAddress() {
+    var inv = state.invite;
+    setAddressRef(state.student && inv.code && inv.forKey === studentKey(state.student.name) ? inv.code : "");
+  }
+
+  // Puts ?ref= and a code in the address, or takes it off (""), keeping the page.
+  function setAddressRef(code) {
+    var params;
+    try { params = new URLSearchParams(location.search); } catch (e) { return; }
+    if ((params.get("ref") || "") === code) return;
+    if (code) params.set("ref", code);
+    else params.delete("ref");
+    var rest = params.toString();
+    try { history.replaceState(null, "", location.pathname + (rest ? "?" + rest : "") + location.hash); } catch (e) { /* file:// in some browsers */ }
   }
 
   function pendingInvite() {
@@ -762,19 +781,20 @@
     var inv = state.invite;
     if (!state.student || !config.resultsUrl || inv.loading) return;
     var key = studentKey(state.student.name);
-    if (inv.forKey === key && (inv.code || inv.off)) return;
+    if (inv.forKey === key && (inv.code || inv.off)) { showInviteInAddress(); return; }
     inv.forKey = key;
     inv.code = "";
     inv.off = false;
     try {
       var saved = JSON.parse(readSetting(MY_INVITE_KEY, "null"));
-      if (saved && saved.key === key && /^[0-9a-f]{8}$/.test(saved.code)) { inv.code = saved.code; return; }
+      if (saved && saved.key === key && /^[0-9a-f]{8}$/.test(saved.code)) { inv.code = saved.code; showInviteInAddress(); return; }
     } catch (e) { /* ask the script */ }
     inv.loading = true;
     callBackend(asStudent({ action: "inviteCode" })).then(function (res) {
       if (res && res.ok && /^[0-9a-f]{8}$/.test(res.code)) {
         inv.code = res.code;
         writeSetting(MY_INVITE_KEY, JSON.stringify({ key: key, code: res.code }));
+        if (state.student && studentKey(state.student.name) === key) showInviteInAddress();
       } else inv.off = true;
     }, function () {
       inv.forKey = ""; // offline: the plain link for now, and it tries again next time
