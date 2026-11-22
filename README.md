@@ -102,7 +102,9 @@ Invites need the latest `Code.gs`. Until it's deployed, the Share page sends the
 3. Students sign in, check their name (email is optional) and press **Join the class**. Their names appear under **Live now**, and each join is saved on the **Attendance** tab of your Google Sheet.
 4. Move with **Next word** / **Previous** or the ← → arrow keys. Students' screens follow within a few seconds (they check every 2–3 seconds through the Google script). Each student can press 🔊 to hear the word.
 5. To go on with another lesson, choose it under **Change lesson**. The class moves there at its first word: it's still the same class, so everyone who joined stays in it (and in the video call), and their pages follow within a few seconds.
-6. Press **End class** when you're done. A class nobody ends stops being live after 4 hours.
+6. Press **End class** when you're done.
+
+So a class isn't left running by mistake, every 30 minutes (from the start, or the last **Continue**) your page asks **Still teaching?** over whatever page of the site you're on, with a 10-minute countdown. Press **Continue** (or Escape) to carry on for another 30 minutes, or **End class now**. If nobody presses Continue in time, the class ends for everyone, its video call too, and your page says so. The tab's title starts with ⏰ while it asks. If your page was closed, the Google script ends the class itself 2 minutes after the countdown would have run out. With an older `Code.gs`, the reminder only works while your page is open, counts from when the page first saw the class, and a class nobody ends stops being live after 4 hours.
 
 Students can only join while a class is running. Names and emails aren't verified; they identify who attended.
 

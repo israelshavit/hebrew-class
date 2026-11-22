@@ -586,6 +586,7 @@
     else app.appendChild(renderHome());
     var title = lesson ? lessonName(lesson) : PAGE_TITLES[view] && t(PAGE_TITLES[view]);
     document.title = (title ? title + " · " : "") + t("Hebrew Class");
+    markTitle();
     fitSheet();
     syncCall();
   }
@@ -3198,7 +3199,8 @@
       live.remote = res;
       live.error = "";
       if (!res.running) live.teacherIndex = null;
-      if (!teacher) followClass();
+      if (teacher) noteKeep(res);
+      else followClass();
     }).catch(function () {
       live.error = t("Couldn't reach the class service. Retrying…");
     }).then(function () {
@@ -3279,12 +3281,14 @@
     callBackend({ action: "liveLesson", passcode: state.teacher.passcode, lessonId: lesson.id, seq: live.seq }).then(function (res) {
       if (res && res.ok) {
         live.remote = res;
+        noteKeep(res);
       } else if (res && res.error === "wrong-passcode") {
         forgetTeacherPasscode();
         state.teacher.error = "That passcode didn't work. Check it matches the one in your Google script.";
       } else if (res && res.error === "not-live") {
         live.remote = { running: false };
         live.teacherIndex = null;
+        noteKeep(live.remote);
       } else {
         // bad-request: a Google script from before moving lessons.
         undo(res && res.error === "bad-request"
@@ -3312,12 +3316,16 @@
   function startLiveClass(lesson) {
     live.busy = true;
     render();
-    callBackend({ action: "liveStart", passcode: state.teacher.passcode, lessonId: lesson.id }).then(function (res) {
+    callBackend({
+      action: "liveStart", passcode: state.teacher.passcode, lessonId: lesson.id,
+      askMinutes: LIVE_ASK_MS / 60000, answerMinutes: LIVE_ANSWER_MS / 60000 // see Still teaching?
+    }).then(function (res) {
       if (res && res.ok) {
         live.remote = res;
         live.teacherIndex = 0;
         live.attendees = [];
         live.error = "";
+        noteKeep(res);
       } else if (res && res.error === "wrong-passcode") {
         forgetTeacherPasscode();
         state.teacher.error = "That passcode didn't work. Check it matches the one in your Google script.";
@@ -3335,22 +3343,249 @@
 
   function endLiveClass() {
     if (!window.confirm(t("End the live class for everyone?"))) return;
+    finishLiveClass(false);
+  }
+
+  function onLivePage() {
+    return state.route.view === "lesson" && state.route.tab === "live";
+  }
+
+  // auto: nobody pressed Continue in time (see Still teaching? below), and the
+  // teacher may be on another page of the site, which isn't redrawn.
+  function finishLiveClass(auto) {
     live.busy = true;
-    render();
+    if (!auto) keep.askAt = 0;
+    closeKeep();
+    if (onLivePage()) render();
     callBackend({ action: "liveEnd", passcode: state.teacher.passcode }).then(function (res) {
       if (res && res.ok) {
         live.remote = { running: false };
         live.teacherIndex = null;
         live.attendees = [];
+        keep.askAt = 0;
+        keep.session = "";
+        if (auto) showKeepEnded(keepEndedText());
         // The meter catches up with the call in about 2 minutes, once Daily and the script have the numbers.
         usage.at = Math.min(usage.at, Date.now() - USAGE_REFRESH_MS + 150000);
+      } else if (res && res.error === "wrong-passcode") {
+        forgetTeacherPasscode();
+        state.teacher.error = "That passcode didn't work. Check it matches the one in your Google script.";
       }
     }, function () {
       live.error = t("Couldn't end the class. Try again.");
+      if (auto) keep.checked = ""; // tried again in a moment
     }).then(function () {
       live.busy = false;
-      render();
+      if (onLivePage()) render();
+      if (auto) keepTick();
     });
+  }
+
+  /* ---------- Still teaching? ----------
+     So a class isn't left running by mistake, the teacher's page asks every
+     30 minutes (from the start, or the last Continue) and ends the class for
+     everyone if Continue isn't pressed within 10. It shows on any page of the
+     site, over everything. The script keeps the time (askIn in its replies),
+     so every page the teacher has open agrees, and it ends a forgotten class
+     itself 2 minutes later, in case the page was closed (see Code.gs). With an
+     older script, this page counts from when it first saw the class. */
+
+  var LIVE_ASK_MS = 30 * 60000;
+  var LIVE_ANSWER_MS = 10 * 60000;
+
+  function keepEndedText() {
+    return t("Continue wasn't pressed within {n} minutes, so the class ended for everyone.", { n: LIVE_ANSWER_MS / 60000 });
+  }
+
+  var keep = {
+    askAt: 0,         // when to ask, on this computer's clock; 0 with no class
+    session: "",      // the class askAt is for
+    stage: "",        // "ask" while the question shows, "ended" when it says the class ended
+    checked: "",      // the step the script was last asked about, so it's asked once per step
+    checking: false,
+    sending: false,   // Continue is on its way to the script
+    error: "",
+    timer: null,
+    box: null,        // the <dialog>, made the first time it's needed
+    ui: null
+  };
+
+  // From the script's reply about the class: when to ask next.
+  function noteKeep(res) {
+    if (!isLiveTeacher()) return;
+    if (!res || !res.running) {
+      // Ended after the countdown ran out: by this page, or by the script if this page was asleep.
+      var due = keep.askAt && Date.now() >= keep.askAt + LIVE_ANSWER_MS;
+      keep.askAt = 0;
+      keep.session = "";
+      if (due) showKeepEnded(keepEndedText());
+      else if (keep.stage === "ask") closeKeep();
+    } else {
+      var at = typeof res.askIn === "number" ? Date.now() + res.askIn
+        : keep.session === res.sessionId ? keep.askAt
+        : Date.now() + LIVE_ASK_MS; // an older script
+      // A few seconds either way is just the time the reply took, and would make the countdown jump.
+      if (keep.session !== res.sessionId || Math.abs(at - keep.askAt) > 5000) keep.askAt = at;
+      keep.session = res.sessionId;
+    }
+    if (!keep.checking) keepTick();
+  }
+
+  // Shows the question when it's time, counts down, and ends the class when the time runs out.
+  function keepTick() {
+    clearTimeout(keep.timer);
+    keep.timer = null;
+    if (!keep.askAt || !isLiveTeacher()) {
+      if (keep.stage === "ask") closeKeep();
+      return;
+    }
+    var now = Date.now();
+    if (now < keep.askAt) {
+      if (keep.stage === "ask") closeKeep();
+      keep.timer = setTimeout(keepTick, Math.min(keep.askAt - now, 60000)); // each minute, in case the computer slept
+      return;
+    }
+    var left = keep.askAt + LIVE_ANSWER_MS - now;
+    var step = (left > 0 ? "ask " : "end ") + keep.askAt;
+    // The script is asked first, in case the class ended, or went on, from another page.
+    if (keep.checked !== step) {
+      checkKeep(step);
+      return;
+    }
+    if (left > 0) {
+      if (!keep.sending || keep.stage === "ask") showKeepAsk(left); // closed with Escape, it stays closed while Continue sends
+      keep.timer = setTimeout(keepTick, left % 1000 || 1000);
+    } else if (!live.busy) {
+      finishLiveClass(true);
+    } else {
+      keep.timer = setTimeout(keepTick, 5000);
+    }
+  }
+
+  function checkKeep(step) {
+    if (keep.checking) return;
+    keep.checking = true;
+    callBackend({ action: "liveState" }).then(function (res) {
+      if (!res || !res.ok || live.moving) return;
+      live.remote = res;
+      if (!res.running) live.teacherIndex = null;
+      noteKeep(res);
+    }, function () { /* goes ahead without it */ }).then(function () {
+      keep.checking = false;
+      keep.checked = step;
+      keepTick();
+      renderLiveIfChanged();
+    });
+  }
+
+  function continueLiveClass() {
+    if (keep.sending) return;
+    keep.sending = true;
+    keep.error = "";
+    keepTick();
+    callBackend({ action: "liveKeep", passcode: state.teacher.passcode }).then(function (res) {
+      if (res && res.ok) {
+        noteKeep(res);
+      } else if (res && res.error === "not-live") {
+        live.remote = { running: false };
+        live.teacherIndex = null;
+        keep.askAt = 0;
+        keep.session = "";
+        showKeepEnded(t("The class had already ended."));
+      } else if (res && res.error === "wrong-passcode") {
+        forgetTeacherPasscode();
+        state.teacher.error = "That passcode didn't work. Check it matches the one in your Google script.";
+      } else {
+        // bad-request: a Google script from before Continue, so this page keeps the time.
+        keep.askAt = Date.now() + LIVE_ASK_MS;
+      }
+    }, function () {
+      keep.error = t("Couldn't reach the class service. Check your connection and try again.");
+    }).then(function () {
+      keep.sending = false;
+      keepTick();
+      renderLiveIfChanged();
+    });
+  }
+
+  // Outside #app, so redrawing the page leaves it alone.
+  function keepDialog() {
+    if (keep.box) return;
+    var ui = keep.ui = {};
+    ui.title = el("h2", { id: "keep-title" });
+    ui.count = el("p", { class: "keep-count" });
+    ui.text = el("p", { id: "keep-text" });
+    ui.hint = el("p", { class: "hint" });
+    ui.error = el("p", { class: "notice error" });
+    ui.go = el("button", { class: "btn primary", type: "button", onclick: function () {
+      if (keep.stage === "ask") continueLiveClass(); else closeKeep();
+    } });
+    ui.end = el("button", { class: "btn", type: "button", onclick: function () { finishLiveClass(false); } });
+    keep.box = el("dialog", {
+      class: "keep-dialog no-print", role: "alertdialog", "aria-labelledby": "keep-title", "aria-describedby": "keep-text",
+      // Escape closes it, which is Continue while it asks.
+      onclose: function () {
+        if (keep.box.open) return; // opened again since
+        var asking = keep.stage === "ask";
+        keep.stage = "";
+        markTitle();
+        if (asking) continueLiveClass();
+      }
+    }, [ui.title, ui.count, ui.text, ui.hint, ui.error, el("div", { class: "actions" }, [ui.go, ui.end])]);
+    document.body.appendChild(keep.box);
+  }
+
+  function showKeepAsk(left) {
+    keepDialog();
+    var ui = keep.ui;
+    var s = Math.ceil(left / 1000);
+    ui.title.textContent = t("Still teaching?");
+    ui.count.hidden = false;
+    ui.count.textContent = Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2);
+    ui.text.textContent = t("When this reaches 0:00, the live class ends for everyone, unless you press Continue.");
+    ui.hint.hidden = false;
+    ui.hint.textContent = t("You're asked every {n} minutes, so a class isn't left running by mistake.", { n: LIVE_ASK_MS / 60000 });
+    ui.error.hidden = !keep.error;
+    ui.error.textContent = keep.error;
+    ui.go.textContent = keep.sending ? t("Continuing…") : t("Continue");
+    ui.end.hidden = false;
+    ui.end.disabled = keep.sending || live.busy;
+    ui.end.textContent = t("End class now");
+    openKeep("ask");
+  }
+
+  function showKeepEnded(message) {
+    keepDialog();
+    var ui = keep.ui;
+    keep.error = "";
+    ui.title.textContent = t("The live class has ended");
+    ui.count.hidden = true;
+    ui.text.textContent = message;
+    ui.hint.hidden = true;
+    ui.error.hidden = true;
+    ui.go.textContent = t("OK");
+    ui.end.hidden = true;
+    openKeep("ended");
+    ui.go.focus();
+  }
+
+  function openKeep(stage) {
+    keep.stage = stage;
+    if (!keep.box.open) keep.box.showModal(); // puts the focus on its first button
+    markTitle();
+  }
+
+  function closeKeep() {
+    keep.stage = "";
+    keep.error = "";
+    if (keep.box && keep.box.open) keep.box.close();
+    markTitle();
+  }
+
+  // The tab's title starts with ⏰ while it asks, for a teacher who's on another tab.
+  function markTitle() {
+    var title = document.title.replace(/^⏰ /, "");
+    document.title = (keep.stage === "ask" ? "⏰ " : "") + title;
   }
 
   function joinLiveClass(name, email) {
@@ -4970,6 +5205,7 @@
   }, REFRESH_MS);
   document.addEventListener("visibilitychange", function () {
     if (document.hidden) return;
+    keepTick(); // a phone may have held its timers back
     checkForNewVersion();
     sendPlace(); // only when the time zone has changed
     if (onTeacherPage()) { loadResults(); loadSuggestions(); }
@@ -4991,6 +5227,7 @@
       if (opener) { opener.focus(); return; }
     }
     if (document.querySelector(".lesson-menu:not([hidden])")) return; // arrows don't turn cards behind an open list
+    if (keep.box && keep.box.open) return; // or behind Still teaching?
     if (state.route.view !== "lesson" || (state.route.tab !== "cards" && state.route.tab !== "live")) return;
     if (e.altKey || e.ctrlKey || e.metaKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
     var move = state.route.tab === "live" ? moveLive : moveCard;

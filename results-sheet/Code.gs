@@ -38,11 +38,12 @@ function doPost(e) {
   if (data.action === "liveState") return reply(liveReply(liveState()));
   if (data.action === "liveJoin") return liveJoin(data);
   if (data.action === "liveCall") return liveCall(data);
-  if (data.action === "liveStart" || data.action === "liveSet" || data.action === "liveLesson" || data.action === "liveEnd" || data.action === "liveAttendees" || data.action === "callUsage") {
+  if (data.action === "liveStart" || data.action === "liveSet" || data.action === "liveLesson" || data.action === "liveKeep" || data.action === "liveEnd" || data.action === "liveAttendees" || data.action === "callUsage") {
     if (!isTeacher(data)) return reply({ ok: false, error: "wrong-passcode" });
     if (data.action === "liveStart") return liveStart(data);
     if (data.action === "liveSet") return liveSet(data);
     if (data.action === "liveLesson") return liveLesson(data);
+    if (data.action === "liveKeep") return liveKeep();
     if (data.action === "liveEnd") return liveEnd();
     if (data.action === "callUsage") return callUsage();
     return liveAttendees();
@@ -61,6 +62,13 @@ function isTeacher(data) {
 
 var LIVE_KEY = "liveClass";
 var LIVE_MAX_HOURS = 4; // A class nobody ended stops counting as live after this.
+// So a class isn't left running by mistake, the teacher's page asks "Still teaching?" LIVE_ASK_MINUTES
+// after the class starts or Continue was last pressed, and ends the class if Continue isn't pressed
+// within LIVE_ANSWER_MINUTES. In case the page was closed, the script ends it LIVE_GRACE_MINUTES later.
+// The page may ask for shorter times when it starts the class (handy for a quick test), never longer.
+var LIVE_ASK_MINUTES = 30;
+var LIVE_ANSWER_MINUTES = 10;
+var LIVE_GRACE_MINUTES = 2;
 var ATTENDANCE_SHEET = "Attendance";
 // Name is last so sheets made before it was added keep their columns.
 var ATTENDANCE_HEADERS = ["Joined", "Email", "Lesson ID", "Class ID", "Name"];
@@ -73,8 +81,29 @@ function liveState() {
     if (raw) cache.put(LIVE_KEY, raw, 21600);
   }
   var live = raw ? JSON.parse(raw) : { running: false };
-  if (live.running && Date.now() - live.startedAt > LIVE_MAX_HOURS * 3600000) live = { running: false };
+  if (live.running && (Date.now() - live.startedAt > LIVE_MAX_HOURS * 3600000 || liveForgotten(live))) live = { running: false };
   return live;
+}
+
+// Nobody pressed Continue in time. keptAt: when the class started or Continue was last pressed
+// (classes started before it was added have none).
+function liveForgotten(live) {
+  return !!live.keptAt && Date.now() - live.keptAt > (liveAskMinutes(live) + liveAnswerMinutes(live) + LIVE_GRACE_MINUTES) * 60000;
+}
+
+// The class's own times, which the page chose when it started it.
+function liveAskMinutes(live) {
+  return live.askMinutes || LIVE_ASK_MINUTES;
+}
+
+function liveAnswerMinutes(live) {
+  return live.answerMinutes || LIVE_ANSWER_MINUTES;
+}
+
+// A shorter time the page asked for, whole minutes from 1; never longer than the most.
+function shorterMinutes(value, most) {
+  var n = Math.floor(Number(value));
+  return n >= 1 && n < most ? n : most;
 }
 
 function saveLive(live) {
@@ -83,17 +112,23 @@ function saveLive(live) {
   PropertiesService.getScriptProperties().setProperty(LIVE_KEY, raw);
 }
 
+// askIn: milliseconds until the teacher's page asks "Still teaching?" (below 0 once it has asked).
 function liveReply(live) {
-  return live.running
-    ? { ok: true, running: true, lessonId: live.lessonId, index: live.index, sessionId: live.sessionId }
-    : { ok: true, running: false };
+  if (!live.running) return { ok: true, running: false };
+  var res = { ok: true, running: true, lessonId: live.lessonId, index: live.index, sessionId: live.sessionId };
+  if (live.keptAt) res.askIn = live.keptAt + liveAskMinutes(live) * 60000 - Date.now();
+  return res;
 }
 
 function liveStart(data) {
   var lessonId = safe(data.lessonId, 80);
   if (!lessonId) return reply({ ok: false, error: "bad-request" });
   var now = Date.now();
-  var live = { running: true, lessonId: lessonId, index: 0, seq: 0, startedAt: now, sessionId: String(now) };
+  var live = {
+    running: true, lessonId: lessonId, index: 0, seq: 0, startedAt: now, keptAt: now, sessionId: String(now),
+    askMinutes: shorterMinutes(data.askMinutes, LIVE_ASK_MINUTES),
+    answerMinutes: shorterMinutes(data.answerMinutes, LIVE_ANSWER_MINUTES)
+  };
   var old;
   withLock(function () { old = liveState(); saveLive(live); });
   deleteRoom(old); // a class that was still running loses its call
@@ -133,6 +168,20 @@ function liveLesson(data) {
         live.index = 0;
         live.seq = seq;
       }
+      saveLive(live);
+    }
+  });
+  if (!live.running) return reply({ ok: false, error: "not-live" });
+  return reply(liveReply(live));
+}
+
+// The teacher pressed Continue: the next "Still teaching?" comes the class's ask minutes from now.
+function liveKeep() {
+  var live;
+  withLock(function () {
+    live = liveState();
+    if (live.running) {
+      live.keptAt = Date.now();
       saveLive(live);
     }
   });
