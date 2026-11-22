@@ -332,6 +332,17 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 .resource-kind { color: var(--accent-dark); font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 .resource-title { font-size: 1.05rem; font-weight: 600; overflow-wrap: anywhere; }
 .resource-meta { color: var(--muted); font-size: .85rem; }
+.resource-picture {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 16px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.resource-picture img { display: block; width: 100%; height: auto; }
+a.resource-meta { color: var(--accent-dark); justify-self: start; }
 
 /* List of a lesson's quizzes */
 .quiz-best { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -662,6 +673,8 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 4px; }
 }
 .sheet .sep { color: #718096; }
 .sheet-notes { margin: .8em 0 0; font-size: .9em; color: #2d3748; }
+/* In em, so it shrinks with the text when the sheet is fitted to the page. */
+.sheet-picture { display: block; width: 46em; max-width: 100%; height: auto; margin: .9em auto 0; }
 .sheet-notes a { color: var(--accent-dark); overflow-wrap: anywhere; }
 
 /* Word by word */

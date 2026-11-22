@@ -162,6 +162,8 @@ window.HebrewClass.text.es = {
   "Video": "Video",
   "Opens in a new tab": "Se abre en una pestaña nueva",
   "No resources for this lesson yet.": "Esta lección todavía no tiene recursos.",
+  "Picture": "Imagen",
+  "Open full size": "Abrir en tamaño completo",
   "Listen": "Escuchar",
   "Listen to the Hebrew": "Escuchar el hebreo",
   "Click to listen": "Haz clic para escuchar",

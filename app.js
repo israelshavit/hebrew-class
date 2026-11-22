@@ -186,7 +186,8 @@
   // Rows are ["English", "translit", "Hebrew"], or for male/female forms
   // ["English (m/f)", ["translit m", "translit f"], ["Hebrew m", "Hebrew f"]].
   // A fourth item is the meaning in Spanish. A lesson and each of its sections
-  // can have es: { title, subtitle, notes, explanation } in Spanish.
+  // can have es: { title, subtitle, notes, explanation } in Spanish. A lesson's
+  // picture is { src, title, width, height } (es: { picture } for its Spanish copy).
   function normalizeLesson(raw) {
     var forms = [];
     var sections = (raw.sections || []).map(function (section, si) {
@@ -223,6 +224,7 @@
       video: raw.video || "",
       videoTitle: raw.videoTitle || "",
       notes: raw.notes || "",
+      picture: raw.picture || null,
       es: raw.es || {},
       sections: sections,
       forms: forms
@@ -1495,9 +1497,10 @@
     return opener;
   }
 
-  // The lesson's video (more kinds of resource can be added here later).
+  // The lesson's video and picture (more kinds of resource can be added here later).
   function renderResources(lesson) {
     var items = [];
+    var picture = localText(lesson, "picture");
     if (lesson.video) {
       items.push(el("a", { class: "resource", href: lesson.video, target: "_blank", rel: "noopener" }, [
         el("span", { class: "resource-icon", "aria-hidden": "true", text: "▶" }),
@@ -1506,6 +1509,19 @@
           el("span", { class: "resource-title", text: lesson.videoTitle || lesson.video }),
           el("span", { class: "resource-meta", text: t("Opens in a new tab") })
         ])
+      ]));
+    }
+    if (picture) {
+      // Opening it on its own lets a phone zoom in on it.
+      items.push(el("figure", { class: "resource-picture" }, [
+        el("figcaption", { class: "resource-text" }, [
+          el("span", { class: "resource-kind", text: t("Picture") }),
+          el("span", { class: "resource-title", text: picture.title || "" })
+        ]),
+        el("a", { href: picture.src, target: "_blank", rel: "noopener" }, [
+          el("img", { src: picture.src, alt: picture.title || "", width: picture.width, height: picture.height })
+        ]),
+        el("a", { class: "resource-meta", href: picture.src, target: "_blank", rel: "noopener", text: t("Open full size") })
       ]));
     }
     return el("div", { class: "resources" }, [
@@ -1602,12 +1618,15 @@
     var first = pageNo === 1;
     var last = pageNo === pageCount;
     var pageLabel = pageCount > 1 ? t("Page {n} of {count}", { n: pageNo, count: pageCount }) : "";
+    var picture = localText(lesson, "picture");
     return el("div", { class: "sheet" }, [
       first ? el("h2", { class: "sheet-title", text: localText(lesson, "title") }) : null,
       el("p", { class: "sheet-subtitle", text: (first
         ? [localText(lesson, "subtitle"), pageLabel]
         : [localText(lesson, "title"), pageLabel]).filter(Boolean).join(" · ") }),
       table,
+      // Its width and height let fitSheet measure it before it has loaded.
+      last && picture ? el("img", { class: "sheet-picture", src: picture.src, alt: picture.title || "", width: picture.width, height: picture.height }) : null,
       last && lesson.notes ? el("p", { class: "sheet-notes" }, [el("strong", { text: t("Notes: ") }), localText(lesson, "notes")]) : null,
       last && lesson.video ? el("p", { class: "sheet-notes" }, [
         el("strong", { text: t("Video: ") }),
