@@ -817,13 +817,27 @@ a.resource-meta { color: var(--accent-dark); justify-self: start; }
 .option .opt-tr { margin-right: auto; }
 .match-item.he .opt-tr { display: block; margin-top: 2px; }
 .option-row { position: relative; }
-.option-row .option { padding-left: 60px; }
+/* The listen button takes the left of the row, wide enough that a tap just
+   beside the speaker plays the word instead of answering. The line shows
+   where it ends. */
+.option-row .option { padding-left: 108px; }
 .option-speak {
   position: absolute;
-  left: 10px;
-  top: 50%;
-  transform: translateY(-50%);
+  left: 2px;
+  top: 2px;
+  bottom: 2px;
+  width: 92px;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: calc(var(--radius-sm) - 2px) 0 0 calc(var(--radius-sm) - 2px);
+  background: transparent;
 }
+.option-speak svg { width: 36px; height: 36px; padding: 6px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); }
+.option-speak:hover { background: var(--accent-soft); }
+.option-speak:hover svg { border-color: var(--accent); }
+.option-speak:focus-visible { outline-offset: -3px; }
 .option:hover:not(:disabled), .match-item:hover:not(:disabled) { border-color: var(--accent); }
 .option:disabled, .match-item:disabled { cursor: default; }
 .option.correct, .match-item.matched { border-color: var(--good); background: var(--good-soft); color: var(--text); }
