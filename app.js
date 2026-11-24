@@ -112,7 +112,20 @@
   // English until someone chooses Español on this browser.
   var uiLang = readSetting("hebrewClass.lang", "") === "es" ? "es" : "en";
   var missingText = {};
-  document.documentElement.lang = uiLang;
+  setPageLanguage(uiLang);
+
+  // The page's language, for the browser. In Spanish the whole page is marked
+  // not to be translated, as the teacher asked: the student chose Spanish, so
+  // Chrome shouldn't offer to turn it into English. In English, Chrome may
+  // still translate the interface, but never Hebrew or transliteration (el()
+  // and mixed() mark them).
+  function setPageLanguage(code) {
+    var root = document.documentElement;
+    root.lang = code;
+    if (code === "es") root.setAttribute("translate", "no");
+    else root.removeAttribute("translate");
+    root.classList.toggle("notranslate", code === "es"); // the same, for older Chrome
+  }
 
   // The interface text in the chosen language; {name} is filled in from vars.
   // "Live class|menu" is "Live class" in English, with its own Spanish (a
@@ -139,7 +152,7 @@
     if (code === uiLang || (code !== "en" && code !== "es")) return;
     uiLang = code;
     writeSetting("hebrewClass.lang", code);
-    document.documentElement.lang = code;
+    setPageLanguage(code);
     stopListening(); // How to say listens for the language chosen
     render();
   }
@@ -291,6 +304,9 @@
         else if (key.slice(0, 2) === "on") node.addEventListener(key.slice(2), value);
         else node.setAttribute(key, value === true ? "" : value);
       });
+      // Hebrew is never translated: Chrome's Translate would turn the lesson's
+      // Hebrew into the student's own language.
+      if (props.lang === "he" && !("translate" in props)) node.setAttribute("translate", "no");
     }
     (children || []).forEach(function (child) {
       if (child === null || child === undefined || child === false) return;
@@ -301,6 +317,26 @@
 
   function heb(text) {
     return state.niqqud ? text : text.replace(NIQQUD, "");
+  }
+
+  // Text that mixes English or Spanish with Hebrew (a section title, say):
+  // each run of Hebrew goes in a plain span marked not to be translated, so
+  // the browser can translate the rest. It looks exactly the same.
+  var HEBREW_RUN = /[֐-׿יִ-ﭏ]+(?:[\s'"׳״.,!?־-]+[֐-׿יִ-ﭏ]+)*/g;
+
+  function mixed(text) {
+    text = String(text || "");
+    var nodes = [];
+    var last = 0;
+    var m;
+    HEBREW_RUN.lastIndex = 0;
+    while ((m = HEBREW_RUN.exec(text))) {
+      if (m.index > last) nodes.push(text.slice(last, m.index));
+      nodes.push(el("span", { translate: "no", text: m[0] }));
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) nodes.push(text.slice(last));
+    return nodes;
   }
 
   function plain(text) {
@@ -1136,7 +1172,7 @@
         : link("#/progress", t("My progress"), view === "progress"),
       link("#/share", t("Share"), view === "share")
     ]));
-    if (!isTeacher()) user.appendChild(el("span", { class: "topnav-name", text: state.student.name }));
+    if (!isTeacher()) user.appendChild(el("span", { class: "topnav-name", translate: "no", text: state.student.name }));
     user.appendChild(el("button", { class: "topnav-out", type: "button", text: t("Sign out"), onclick: signOut }));
   }
 
@@ -1282,7 +1318,7 @@
         el("span", { class: "champ-cup", "aria-hidden": "true", text: "🏆" }),
         el("span", null, [
           t(champions.length > 1 ? "Last week's Hebrew champions:" : "Last week's Hebrew champion:") + " ",
-          el("strong", { text: namesText(champions) }),
+          el("strong", { translate: "no", text: namesText(champions) }),
           el("span", { class: "champ-last-points", text: " · " + pointsText(champions[0].points) })
         ])
       ]) : null,
@@ -1291,7 +1327,7 @@
         var mine = myKey && studentKey(s.name) === myKey;
         return el("li", { class: mine ? "mine" : null }, [
           el("span", { class: "champ-place", text: MEDALS[s.place - 1] || String(s.place) }),
-          el("span", { class: "champ-name", text: s.name + (mine ? " " + t("(you)") : "") }),
+          el("span", { class: "champ-name" }, [el("span", { translate: "no", text: s.name }), mine ? " " + t("(you)") : null]),
           el("span", { class: "champ-points", text: pointsText(s.points) })
         ]);
       })) : el("p", { class: "champ-empty", text: d.me && d.me.points
@@ -1598,18 +1634,18 @@
     lesson.sections.slice(from, to).forEach(function (section, i) {
       var si = from + i;
       tbody.appendChild(el("tr", { class: "section" }, [
-        el("td", { colspan: "3", text: (si + 1) + ". " + localText(section, "title") })
+        el("td", { colspan: "3" }, [(si + 1) + ". "].concat(mixed(localText(section, "title"))))
       ]));
       var explanation = localText(section, "explanation");
       if (explanation) {
         tbody.appendChild(el("tr", { class: "explain" }, [
-          el("td", { colspan: "3", text: heb(explanation) })
+          el("td", { colspan: "3" }, mixed(heb(explanation)))
         ]));
       }
       section.rows.forEach(function (row) {
         tbody.appendChild(el("tr", null, [
           el("td", { text: meaning(row) }),
-          el("td", { class: "tr" }, formSpans(row, function (f) {
+          el("td", { class: "tr", translate: "no" }, formSpans(row, function (f) {
             return f.tr + (f.g ? " (" + f.g + ")" : "");
           })),
           el("td", { class: "he", lang: "he", dir: "rtl" }, formSpans(row, function (f) {
@@ -1806,7 +1842,7 @@
   // (both forms when there are two) with transliteration.
   function wordCard(item) {
     return el("div", { class: "card word-card" }, [
-      el("p", { class: "card-section", text: item.sectionNo + ". " + localText(item.section, "title") }),
+      el("p", { class: "card-section" }, [item.sectionNo + ". "].concat(mixed(localText(item.section, "title")))),
       cardBody(item.row)
     ]);
   }
@@ -1815,7 +1851,7 @@
   // and Next are on screen without scrolling.
   function sectionExplanation(item) {
     var text = localText(item.section, "explanation");
-    return text ? el("p", { class: "card-explain", text: heb(text) }) : null;
+    return text ? el("p", { class: "card-explain" }, mixed(heb(text))) : null;
   }
 
   // English, then each Hebrew form with its transliteration and a listen button.
@@ -1824,7 +1860,7 @@
       return el("div", { class: "card-form" }, [
         f.g ? el("span", { class: "card-gender", text: genderLabel(row, f.g) }) : null,
         el("p", { class: "card-he", lang: "he", dir: "rtl", text: heb(f.he) }),
-        el("p", { class: "card-tr", text: f.tr }),
+        el("p", { class: "card-tr", translate: "no", text: f.tr }),
         speakButton(f.he, "big")
       ]);
     });
@@ -2068,7 +2104,7 @@
         right ? t("Correct!") + " " : t("Not quite. The answer is") + " ",
         right ? null : el("span", { lang: "he", dir: "rtl", text: heb(item.form.he) }),
         right ? null : " ",
-        el("span", { class: "tr", text: "(" + item.form.tr + ")" }),
+        el("span", { class: "tr", translate: "no", text: "(" + item.form.tr + ")" }),
         " ",
         speakButton(item.form.he)
       ]));
@@ -2083,7 +2119,7 @@
   function heWithTr(form) {
     return [
       el("span", { class: "opt-he", text: heb(form.he) }),
-      form.tr && state.showTr ? el("span", { class: "opt-tr", lang: "en", dir: "ltr", text: form.tr }) : null
+      form.tr && state.showTr ? el("span", { class: "opt-tr", lang: "en", dir: "ltr", translate: "no", text: form.tr }) : null
     ];
   }
 
@@ -2225,7 +2261,7 @@
           return el("li", null, [
             el("strong", { text: promptFor(f) }),
             el("span", { class: "he", lang: "he", dir: "rtl", text: heb(f.he) }),
-            el("span", { class: "tr", text: f.tr }),
+            el("span", { class: "tr", translate: "no", text: f.tr }),
             " ",
             speakButton(f.he)
           ]);
@@ -2758,7 +2794,7 @@
     var box = state.suggestions;
     var children = [
       el("p", { class: "suggestion-head" }, [
-        el("strong", { text: item.student }),
+        el("strong", { translate: "no", text: item.student }),
         el("span", { class: "muted", text: formatTime(item.at) })
       ]),
       el("p", { class: "suggestion-text", text: item.text })
@@ -3095,7 +3131,7 @@
     var report = state.report;
     var wrap = el("section", null, [
       el("h1", { text: t("My progress") }),
-      el("p", { class: "lede", text: state.student.name + " · " + t("your quiz scores and Word of the day practice, week by week.") })
+      el("p", { class: "lede" }, [el("span", { translate: "no", text: state.student.name }), " · " + t("your quiz scores and Word of the day practice, week by week.")])
     ]);
     if (!config.resultsUrl) {
       wrap.appendChild(el("p", { class: "notice", text: t(NOT_CONNECTED) }));
@@ -3729,7 +3765,7 @@
       ]),
       el("p", { class: "muted", text: people.length ? t(people.length === 1 ? "1 student has joined:" : "{n} students have joined:", { n: people.length }) : t("No students have joined yet. Share this page's link with them.") }),
       people.length ? el("ul", { class: "live-people" }, people.map(function (p) {
-        return el("li", { text: attendeeLabel(p) });
+        return el("li", { translate: "no", text: attendeeLabel(p) });
       })) : null,
       el("p", { class: "hint", text: t("Use the ← → arrow keys or the buttons to move. Students' screens follow within a few seconds.") })
     ]));
@@ -4448,7 +4484,9 @@
 
   function renderTeacher() {
     var t = state.teacher;
-    var wrap = el("section", null, [
+    // The teacher reads it in English: Chrome shouldn't translate it (it was
+    // changing words and spacing on the teacher's screen).
+    var wrap = el("section", { translate: "no" }, [
       el("a", { class: "back", href: "#/", text: "← All lessons" }),
       el("h1", { text: "Teacher dashboard" })
     ]);

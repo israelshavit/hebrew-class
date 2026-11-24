@@ -39,6 +39,7 @@ Each student picks **English** or **Español** in the top bar. Hebrew is what ev
 - **How to say** takes typed or spoken Spanish. It needs the latest `Code.gs`; with an older one, a student using Spanish is told it isn't switched on yet.
 - **PIN emails**: the reset code comes in the language the student is using. The temporary PIN you send from the Teacher page is in both languages.
 - **The Teacher page stays in English.** Quiz misses are saved in English, so your reports read the same whichever language a student uses; a student in Spanish sees their own misses in Spanish.
+- **Chrome's Translate**: Chrome can offer to translate a page into the reader's own language. It never touches the Hebrew, the transliteration or students' names, so the lessons stay as taught. In Spanish, Chrome doesn't translate the page at all, since the student chose Spanish. In English it may still translate the menus and instructions for a student who reads another language better. The Teacher page is never translated.
 
 ## Getting quiz results
 
