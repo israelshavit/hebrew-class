@@ -5294,7 +5294,20 @@
   });
   window.addEventListener("beforeprint", fitSheet);
 
+  // Opened from the icon on a phone's home screen (not reloaded there): an
+  // iPhone may start on whichever page the icon was added from.
+  function openedFromHomeScreen() {
+    var app = navigator.standalone || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+    if (!app) return false;
+    var nav = window.performance && performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
+    return !nav || nav.type === "navigate";
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
+    // The icon is there for the Word of the day, so it opens on it.
+    if (openedFromHomeScreen() && location.hash !== "#/study/word") {
+      try { history.replaceState(null, "", location.pathname + location.search + "#/study/word"); } catch (e) { /* ignore */ }
+    }
     keepInvite();
     loadLessons(function () {
       lessons.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
