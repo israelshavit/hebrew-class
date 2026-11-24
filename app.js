@@ -47,7 +47,8 @@
     wotdDay: null,      // the Word of the day chosen: today's, or one from the past week
     wotdPractised: {},  // words practised since the page opened, by "day|student"
     say: { text: "", busy: false, error: "", result: null, listening: false },
-    suggestions: { items: null, loading: false, error: "", sending: false, sendError: "", saving: "" },
+    // privateOk: the script can keep a suggestion for the teacher only; onlyTeacher: the student chose that.
+    suggestions: { items: null, loading: false, error: "", sending: false, sendError: "", saving: "", privateOk: false, onlyTeacher: false },
     report: { data: null, loading: false, error: "" },
     // The championship board on the Lessons page. off: the Google script is from before the board.
     // meOpen/howOpen: which parts of the board are opened, kept when the board refreshes
@@ -653,6 +654,15 @@
     state.invite = { code: "", forKey: "", loading: false, off: false };
     setAddressRef(""); // their own code goes on once it's known
     resetBoard(); // "Your points" belong to whoever is signed in
+    forgetSuggestions();
+  }
+
+  // A suggestion sent only to the teacher stays with whoever sent it: the list
+  // is fetched again for the next person signed in on this browser.
+  function forgetSuggestions() {
+    state.suggestions.items = null;
+    state.suggestions.draft = "";
+    state.suggestions.onlyTeacher = false;
   }
 
   function resetBoard() {
@@ -677,6 +687,7 @@
     state.invite = { code: "", forKey: "", loading: false, off: false };
     setAddressRef(""); // the next person on this browser doesn't get this student's code
     resetBoard();
+    forgetSuggestions();
     forgetMyPoints();
     var t = state.teacher;
     t.passcode = "";
@@ -2818,12 +2829,25 @@
 
   /* ---------- Suggestions box ---------- */
 
+  // Who is asking goes with each call: the script shows a suggestion sent only
+  // to the teacher to the teacher and to the student who sent it, no one else.
+  function suggestionsCall(body) {
+    if (isTeacher()) body.passcode = state.teacher.passcode;
+    else if (state.student) asStudent(body);
+    return body;
+  }
+
+  function keepSuggestions(box, res) {
+    box.items = res.suggestions || [];
+    box.privateOk = !!res.privateOk;
+  }
+
   function loadSuggestions() {
     var box = state.suggestions;
     if (!config.resultsUrl || box.loading) return;
     box.loading = true;
-    callBackend({ action: "suggestions" }).then(function (res) {
-      if (res && res.ok) { box.items = res.suggestions || []; box.error = ""; }
+    callBackend(suggestionsCall({ action: "suggestions" })).then(function (res) {
+      if (res && res.ok) { keepSuggestions(box, res); box.error = ""; }
       else box.error = backendMessage(res, "Couldn't load the suggestions.");
     }, function () {
       box.error = t("Couldn't reach the suggestions box. Check your connection.");
@@ -2839,10 +2863,12 @@
     box.sending = true;
     box.sendError = "";
     render();
-    var body = state.student ? asStudent({ action: "suggest", text: text })
-      : { action: "suggest", name: "Teacher", passcode: state.teacher.passcode, text: text };
+    // Only a student can send one to the teacher alone, and only once the script says it can keep it so.
+    var action = state.student && box.privateOk && box.onlyTeacher ? "suggestPrivate" : "suggest";
+    var body = state.student ? asStudent({ action: action, text: text })
+      : { action: action, name: "Teacher", passcode: state.teacher.passcode, text: text };
     callBackend(body).then(function (res) {
-      if (res && res.ok) { box.items = res.suggestions || []; box.draft = ""; }
+      if (res && res.ok) { keepSuggestions(box, res); box.draft = ""; }
       else box.sendError = backendMessage(res, "Couldn't send your suggestion. Try again.");
     }, function () {
       box.sendError = t("Couldn't send your suggestion. Check your connection and try again.");
@@ -2858,7 +2884,7 @@
     box.sendError = "";
     render();
     callBackend({ action: "suggestReply", passcode: state.teacher.passcode, id: id, response: text }).then(function (res) {
-      if (res && res.ok) box.items = res.suggestions || [];
+      if (res && res.ok) keepSuggestions(box, res);
       else box.sendError = backendMessage(res, "Couldn't save your response. Try again.");
     }, function () {
       box.sendError = t("Couldn't save your response. Check your connection and try again.");
@@ -2874,7 +2900,9 @@
     var wrap = el("section", null, [
       studyNav("suggestions", null),
       el("h1", { text: t("Suggestions box") }),
-      el("p", { class: "lede", text: t("Ideas to improve this site, or topics you'd like in a lesson. Everyone in the class can read the suggestions and the teacher's responses.") })
+      el("p", { class: "lede", text: box.privateOk
+        ? t("Ideas to improve this site, or topics you'd like in a lesson. Everyone in the class can read the suggestions and the teacher's responses, unless you send yours only to your teacher.")
+        : t("Ideas to improve this site, or topics you'd like in a lesson. Everyone in the class can read the suggestions and the teacher's responses.") })
     ]);
     if (!config.resultsUrl) {
       wrap.appendChild(el("p", { class: "notice", text: t(NOT_CONNECTED) }));
@@ -2892,6 +2920,7 @@
       }
     }, [
       el("div", { class: "field wide" }, [el("label", { for: "suggestion-text", text: t("Your suggestion") }), textarea]),
+      state.student && box.privateOk ? suggestionAudience(box) : null,
       box.sendError ? el("p", { class: "notice error", role: "alert", text: box.sendError }) : null,
       el("div", { class: "actions" }, [el("button", { class: "btn primary", type: "submit", disabled: box.sending, text: box.sending ? t("Sending…") : t("Submit") })])
     ]));
@@ -2911,12 +2940,29 @@
     return wrap;
   }
 
+  // Who can read the suggestion: everyone (as before) or only the teacher.
+  function suggestionAudience(box) {
+    function choice(value, text) {
+      return el("label", { class: "audience-choice" }, [
+        el("input", { type: "radio", name: "suggestion-audience", checked: box.onlyTeacher === value,
+          onchange: function () { box.onlyTeacher = value; } }),
+        text
+      ]);
+    }
+    return el("fieldset", { class: "audience" }, [
+      el("legend", { text: t("Who can read it?") }),
+      choice(false, t("Everyone in the class")),
+      choice(true, t("Only your teacher"))
+    ]);
+  }
+
   function suggestionItem(item) {
     var box = state.suggestions;
     var children = [
       el("p", { class: "suggestion-head" }, [
         el("strong", { translate: "no", text: item.student }),
-        el("span", { class: "muted", text: formatTime(item.at) })
+        el("span", { class: "muted", text: formatTime(item.at) }),
+        item.onlyTeacher ? el("span", { class: "only-teacher", text: isTeacher() ? t("Sent only to you") : t("Only you and your teacher see this") }) : null
       ]),
       el("p", { class: "suggestion-text", text: item.text })
     ];
@@ -5080,7 +5126,7 @@
     (state.suggestions.items || []).forEach(function (s) {
       if (s.student === "Teacher") return; // the teacher's own notes
       var text = String(s.text || "").replace(/\s+/g, " ").trim();
-      add("suggestion", s.at, s.student, "Suggestion", "“" + (text.length > 90 ? text.slice(0, 89).trim() + "…" : text) + "”");
+      add("suggestion", s.at, s.student, s.onlyTeacher ? "Private suggestion" : "Suggestion", "“" + (text.length > 90 ? text.slice(0, 89).trim() + "…" : text) + "”");
     });
     return items.sort(function (a, b) { return b.at - a.at; });
   }

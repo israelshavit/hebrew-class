@@ -287,6 +287,12 @@ window.HebrewClass.text.es = {
   "Couldn't send your suggestion. Check your connection and try again.": "No se pudo enviar tu sugerencia. Revisa tu conexión e inténtalo de nuevo.",
   "Couldn't save your response. Try again.": "No se pudo guardar tu respuesta. Inténtalo de nuevo.",
   "Couldn't save your response. Check your connection and try again.": "No se pudo guardar tu respuesta. Revisa tu conexión e inténtalo de nuevo.",
+  "Ideas to improve this site, or topics you'd like in a lesson. Everyone in the class can read the suggestions and the teacher's responses, unless you send yours only to your teacher.": "Ideas para mejorar este sitio, o temas que te gustaría ver en una lección. Todos en la clase pueden leer las sugerencias y las respuestas de tu docente, salvo que envíes la tuya solo a tu docente.",
+  "Who can read it?": "¿Quién puede leerla?",
+  "Everyone in the class": "Toda la clase",
+  "Only your teacher": "Solo tu docente",
+  "Only you and your teacher see this": "Solo tú y tu docente ven esto",
+  "Sent only to you": "Enviada solo a ti",
 
   // My progress and its PDF
   "your quiz scores and Word of the day practice, week by week.": "tus puntuaciones en las pruebas y tu práctica de la Palabra del día, semana a semana.",

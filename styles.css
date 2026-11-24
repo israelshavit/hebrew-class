@@ -419,6 +419,12 @@ a.resource-meta { color: var(--accent-dark); justify-self: start; }
 .suggestion { padding: 16px 18px; }
 .suggestion-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin: 0 0 4px; }
 .suggestion-head .muted { font-size: .85rem; }
+.only-teacher { font-size: .8rem; font-weight: 600; color: var(--warn); background: var(--warn-soft); border-radius: var(--radius-sm); padding: 1px 8px; }
+/* Who can read a new suggestion */
+.audience { border: 0; margin: 12px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 20px; }
+.audience legend { padding: 0; margin-bottom: 6px; font-weight: 600; }
+.audience-choice { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.audience-choice input { width: 18px; height: 18px; margin: 0; }
 .suggestion-text { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
 .response { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--accent-soft); }
 .response-none { margin: 10px 0 0; font-size: .9rem; }

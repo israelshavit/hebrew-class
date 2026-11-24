@@ -23,8 +23,8 @@ function doPost(e) {
   if (data.action === "place") return savePlace(data);
   if (data.action === "myReport") return myReport(data);
   if (data.action === "practice") return savePractice(data);
-  if (data.action === "suggestions") return listSuggestions();
-  if (data.action === "suggest") return saveSuggestion(data);
+  if (data.action === "suggestions") return listSuggestions(data);
+  if (data.action === "suggest" || data.action === "suggestPrivate") return saveSuggestion(data);
   if (data.action === "suggestReply") return replySuggestion(data);
   if (data.action === "resetPin") return resetPin(data);
   if (data.action === "emailTempPin") return emailTempPin(data);
@@ -1109,36 +1109,55 @@ function savePractice(data) {
 /* ---------- Suggestions box ---------- */
 
 var SUGGESTIONS_SHEET = "Suggestions";
-var SUGGESTIONS_HEADERS = ["ID", "When", "Student", "Suggestion", "Response", "Responded"];
+// "Only teacher" is last so sheets made before it was added keep their columns.
+var SUGGESTIONS_HEADERS = ["ID", "When", "Student", "Suggestion", "Response", "Responded", "Only teacher"];
 
 function suggestionsSheet() {
-  return namedSheet(SUGGESTIONS_SHEET, SUGGESTIONS_HEADERS);
+  var s = namedSheet(SUGGESTIONS_SHEET, SUGGESTIONS_HEADERS);
+  if (s.getLastColumn() < SUGGESTIONS_HEADERS.length) {
+    s.getRange(1, 1, 1, SUGGESTIONS_HEADERS.length).setValues([SUGGESTIONS_HEADERS]); // older sheet: add the newer header
+  }
+  return s;
 }
 
-// Everyone in the class can read the suggestions and the teacher's responses.
-function listSuggestions() {
-  var items = dataRows(suggestionsSheet()).map(function (r) {
-    return {
+// Everyone in the class can read the suggestions and the teacher's responses,
+// except one a student sent only to the teacher ("Yes" under Only teacher):
+// that one only the teacher and its student see (signed in, with their PIN if
+// they have one). privateOk tells the site it can offer the choice.
+function listSuggestions(data) {
+  var teacher = isTeacher(data);
+  var name = cleanName(data.name);
+  var mine = !teacher && name && studentAllowed(name, data.token) ? nameKey(name) : "";
+  var items = [];
+  dataRows(suggestionsSheet()).forEach(function (r) {
+    var onlyTeacher = String(r[6] || "") === "Yes";
+    if (onlyTeacher && !teacher && (!mine || nameKey(unsafe(r[2])) !== mine)) return;
+    items.push({
       id: String(r[0]),
       at: isoDate(r[1]),
       student: unsafe(r[2]),
       text: unsafe(r[3]),
       response: unsafe(r[4]),
-      respondedAt: r[5] ? isoDate(r[5]) : ""
-    };
+      respondedAt: r[5] ? isoDate(r[5]) : "",
+      onlyTeacher: onlyTeacher
+    });
   });
-  return reply({ ok: true, suggestions: items });
+  return reply({ ok: true, suggestions: items, privateOk: true });
 }
 
+// "suggestPrivate" sends it only to the teacher. It's an action of its own so
+// that an older script, which doesn't know it, refuses it rather than showing
+// it to everyone.
 function saveSuggestion(data) {
   var name = cleanName(data.name);
   var text = String(data.text || "").trim();
   if (!name || !text) return reply({ ok: false, error: "bad-request" });
   if (!isTeacher(data) && !studentAllowed(name, data.token)) return reply({ ok: false, error: "sign-in" });
+  var onlyTeacher = data.action === "suggestPrivate" ? "Yes" : "";
   withLock(function () {
-    suggestionsSheet().appendRow([Utilities.getUuid(), new Date(), safe(name, 60), safe(text, 1000), "", ""]);
+    suggestionsSheet().appendRow([Utilities.getUuid(), new Date(), safe(name, 60), safe(text, 1000), "", "", onlyTeacher]);
   });
-  return listSuggestions();
+  return listSuggestions(data);
 }
 
 // The teacher's response to one suggestion; an empty response removes it.
@@ -1157,7 +1176,7 @@ function replySuggestion(data) {
       break;
     }
   });
-  return found ? listSuggestions() : reply({ ok: false, error: "not-found" });
+  return found ? listSuggestions(data) : reply({ ok: false, error: "not-found" });
 }
 
 /* ---------- Championship board ----------
