@@ -4,7 +4,7 @@
   "description": "Lessons, quizzes and the Word of the day for our Hebrew class.",
   "lang": "en",
   "id": "./",
-  "start_url": "./#/study/word",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f4f6f9",

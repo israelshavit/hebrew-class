@@ -531,7 +531,7 @@
   function parseHash() {
     var parts = location.hash.replace(/^#\/?/, "").split("/");
     if (parts[0] === "teacher") return { view: "teacher" };
-    if (parts[0] === "study") return { view: "study", tab: parts[1] === "say" ? "say" : "word" };
+    if (parts[0] === "study") return { view: "study", tab: parts[1] === "say" || parts[1] === "icon" ? parts[1] : "word" };
     if (parts[0] === "suggestions") return { view: "suggestions" };
     if (parts[0] === "progress") return { view: "progress" };
     if (parts[0] === "share") return { view: "share" };
@@ -1425,6 +1425,74 @@
     ]);
   }
 
+  /* ---------- Home screen icon ----------
+     The site can go on a phone's home screen (manifest.json). Chrome would
+     offer to install it as soon as the site opens; as the teacher asked, it's
+     offered only on Self study's Add to home screen page, so Chrome's offer is
+     kept for the button there. Safari has no such offer: the page says how. */
+
+  var installOffer = null; // Chrome's offer, usable once
+  var installed = false;
+
+  window.addEventListener("beforeinstallprompt", function (e) {
+    e.preventDefault(); // nothing pops up when the site opens
+    installOffer = e;
+    if (onIconTab()) render();
+  });
+  window.addEventListener("appinstalled", function () {
+    installOffer = null;
+    installed = true;
+    if (onIconTab()) render();
+  });
+
+  // Opened from the icon, full screen, rather than in the browser.
+  function runningAsApp() {
+    return !!(navigator.standalone || (window.matchMedia && matchMedia("(display-mode: standalone)").matches));
+  }
+
+  function onIconTab() {
+    return state.route.view === "study" && state.route.tab === "icon";
+  }
+
+  function appleDevice() {
+    return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  }
+
+  function renderHomeScreenIcon() {
+    var apple = appleDevice();
+    var android = /Android/.test(navigator.userAgent);
+    var computer = !apple && !android && !touchScreen();
+    function install() {
+      var offer = installOffer;
+      installOffer = null;
+      offer.prompt();
+      offer.userChoice.then(function (choice) {
+        if (choice.outcome === "accepted") installed = true;
+        if (onIconTab()) render();
+      }, function () { if (onIconTab()) render(); });
+    }
+    var button = installOffer ? el("div", { class: "actions" }, [
+      el("button", { class: "btn primary", type: "button", text: computer ? t("Install on this computer") : t("Add to home screen"), onclick: install })
+    ]) : null;
+    // Without Chrome's offer (an iPhone, or after saying no to it), the steps.
+    var steps = el("ul", { class: "home-icon-steps" }, [
+      android ? null : el("li", { text: t("iPhone: tap the Share button (a square with an arrow, sometimes under •••), then Add to Home Screen.") }),
+      apple ? null : el("li", { text: t("Android: in Chrome, tap the menu (⋮), then Add to Home screen or Install app.") })
+    ]);
+    var how = installed ? [el("p", { class: "home-icon-done", role: "status", text: t("Done! Look for the Hebrew Class icon on your home screen.") })]
+      : button && !computer ? [button]
+      : [apple || android ? null : el("p", { text: t("On your phone, open this site, then:") }), steps, button];
+    if (apple && !installed) how.push(el("p", { class: "hint", text: t("On iPhone the icon has its own sign-in, so you sign in there once more.") }));
+    return el("div", { class: "no-print" }, [
+      el("h2", { text: t("Hebrew Class on your home screen") }),
+      el("p", { class: "lede", text: t("Put the Hebrew Class icon on your phone, and open the class like an app, with one tap.") }),
+      el("div", { class: "card home-icon-card" }, [
+        el("img", { class: "home-icon", src: "icons/icon-192.png", alt: "", width: "80", height: "80" }),
+        el("div", { class: "home-icon-how" }, how)
+      ])
+    ]);
+  }
+
   function renderNotFound() {
     return el("section", null, [
       el("a", { class: "back", href: "#/", text: t("← All lessons") }),
@@ -1474,6 +1542,7 @@
       item("say", "#/study/say", t("How to say")),
       lesson ? item("resources", lessonUrl(lesson, "resources"), t("Resources")) : null,
       item("suggestions", "#/suggestions", t("Suggestions")),
+      runningAsApp() ? null : item("icon", "#/study/icon", t("Add to home screen")), // not once it's there
       quiz.menu, // the lesson lists open below all the buttons
       cards.menu
     ]);
@@ -2382,7 +2451,7 @@
       // No visible title: the menu sits at the top, so the word fits on a phone.
       el("h1", { class: "visually-hidden", text: t("Self study") }),
       studyNav(tab, null),
-      tab === "say" ? renderSay() : renderWordOfDay()
+      tab === "say" ? renderSay() : tab === "icon" ? renderHomeScreenIcon() : renderWordOfDay()
     ]);
   }
 
@@ -5297,16 +5366,15 @@
   // Opened from the icon on a phone's home screen (not reloaded there): an
   // iPhone may start on whichever page the icon was added from.
   function openedFromHomeScreen() {
-    var app = navigator.standalone || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
-    if (!app) return false;
+    if (!runningAsApp()) return false;
     var nav = window.performance && performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
     return !nav || nav.type === "navigate";
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    // The icon is there for the Word of the day, so it opens on it.
-    if (openedFromHomeScreen() && location.hash !== "#/study/word") {
-      try { history.replaceState(null, "", location.pathname + location.search + "#/study/word"); } catch (e) { /* ignore */ }
+    // The icon opens on the Lessons page, as the teacher asked.
+    if (openedFromHomeScreen() && location.hash && location.hash !== "#/") {
+      try { history.replaceState(null, "", location.pathname + location.search + "#/"); } catch (e) { /* ignore */ }
     }
     keepInvite();
     loadLessons(function () {

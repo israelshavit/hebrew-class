@@ -477,6 +477,15 @@ a.resource-meta { color: var(--accent-dark); justify-self: start; }
 .share-link { margin: 0; font-weight: 600; overflow-wrap: anywhere; user-select: all; }
 .share-status { display: block; margin-top: 10px; color: var(--muted); font-size: .9rem; }
 .share-status:empty { display: none; }
+
+/* Add to home screen */
+.home-icon-card { display: flex; align-items: flex-start; gap: 20px; }
+.home-icon { flex: none; width: 80px; height: 80px; border-radius: 18px; }
+.home-icon-how > :first-child { margin-top: 0; }
+.home-icon-how > :last-child { margin-bottom: 0; }
+.home-icon-how .actions:first-child { margin-top: 8px; }
+.home-icon-steps { margin: 0 0 12px; padding-left: 20px; display: grid; gap: 8px; }
+.home-icon-done { margin: 8px 0 0; font-weight: 600; color: var(--good); }
 .suggest-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .suggest-card .hint { margin: 0; }
 

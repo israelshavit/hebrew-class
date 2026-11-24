@@ -15,7 +15,7 @@ Across the whole site (menu at the top of every page):
 - **My progress**: each student's quiz scores and Word of the day practice, lesson by lesson and week by week, with the phrases they miss most. The teacher sees everyone's on the Teacher page, with the class's totals for the week and its most missed phrases.
 - **Download PDF** on a report opens the browser's print window; choose "Save as PDF" there. The teacher can save the class report or one student's.
 - **Share** (in the top menu) sends the site's link (`siteUrl` in `config.js`) by the phone's share menu (on phones and tablets), WhatsApp, email or a copied link. A signed-in student's link is their own (see **Invites** below).
-- **Home screen icon**: on a phone, *Add to Home Screen* (iPhone: Safari's Share button; Android: Chrome's menu) puts a Hebrew Class icon (`manifest.json`, `icons/`) there. It opens the site full screen like an app, on the Word of the day. On iPhone it keeps its own sign-in, apart from Safari's.
+- **Add to home screen** (in the Self study menu, next to Suggestions) puts a Hebrew Class icon (`manifest.json`, `icons/`) on the phone: Chrome's install button there, or the steps for an iPhone. Chrome no longer offers it by itself when the site opens. The icon opens the site full screen like an app, on the Lessons page. On iPhone it keeps its own sign-in, apart from Safari's.
 - **English / Español** (the menu in the blue top bar, also before signing in): the interface language, remembered on each device. It's English until someone chooses Español. See [English and Spanish](#english-and-spanish).
 
 There is no build step. Open `index.html` in a browser to try it locally.

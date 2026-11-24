@@ -145,6 +145,18 @@ window.HebrewClass.text.es = {
   "Link copied.": "Enlace copiado.",
   "Couldn't copy it. Select the link above and copy it.": "No se pudo copiar. Selecciona el enlace de arriba y cópialo.",
 
+  // Add to home screen (Self study). The names of the phone's own buttons are
+  // as the phone shows them in Spanish.
+  "Add to home screen": "Agregar a inicio",
+  "Hebrew Class on your home screen": "Clase de hebreo en tu pantalla de inicio",
+  "Put the Hebrew Class icon on your phone, and open the class like an app, with one tap.": "Pon el ícono de Clase de hebreo en tu teléfono y abre la clase como una app, con un toque.",
+  "Install on this computer": "Instalar en esta computadora",
+  "iPhone: tap the Share button (a square with an arrow, sometimes under •••), then Add to Home Screen.": "iPhone: toca el botón Compartir (un cuadrado con una flecha, a veces dentro de •••) y luego Agregar a inicio.",
+  "Android: in Chrome, tap the menu (⋮), then Add to Home screen or Install app.": "Android: en Chrome, toca el menú (⋮) y luego Agregar a la pantalla principal o Instalar app.",
+  "On your phone, open this site, then:": "En tu teléfono, abre este sitio y luego:",
+  "Done! Look for the Hebrew Class icon on your home screen.": "¡Listo! Busca el ícono de Clase de hebreo en tu pantalla de inicio.",
+  "On iPhone the icon has its own sign-in, so you sign in there once more.": "En iPhone el ícono guarda su propia sesión, así que ahí tienes que entrar una vez más.",
+
   // A lesson and its sheet
   "← All lessons": "← Todas las lecciones",
   "Lesson not found": "No se encontró la lección",
