@@ -2405,40 +2405,89 @@
     return h >>> 0;
   }
 
-  // The word list in words/daily-words.js, in the same shape as a lesson.
+  // The word list in words/daily-words.js and the phrases in
+  // words/daily-phrases.js, each in the same shape as a lesson.
   var dailyWords = null;
+  var dailyPhrases = null;
 
   HC.setDailyWords = function (sections) {
     dailyWords = normalizeLesson({ id: "daily-words", title: t("Word of the day"), sections: sections });
     seededShuffle(dailyWords.order = cardList(dailyWords), hashText("daily-words"));
   };
 
-  // Every Hebrew word used in the lessons taught up to this day, without niqqud.
+  HC.setDailyPhrases = function (sections) {
+    dailyPhrases = normalizeLesson({ id: "daily-phrases", title: t("Phrase of the day"), sections: sections });
+    dailyPhrases.forms.forEach(function (form) { form.row.phrase = true; });
+    seededShuffle(dailyPhrases.order = cardList(dailyPhrases), hashText("daily-phrases"));
+  };
+
+  // The day after this one brings the first phrase; from then on a phrase
+  // every other day, as the teacher asked. The days before stay as they were.
+  var PHRASES_FROM = "2026-11-24";
+
+  // The Hebrew letters of a text, its words one space apart, without niqqud.
+  function hebrewWords(text) {
+    return plain(text).split(/[^\u05D0-\u05EA]+/).filter(Boolean);
+  }
+
+  // Every Hebrew word used in the lessons taught up to this day.
   function taughtWords(day) {
     var seen = {};
     lessons.forEach(function (lesson) {
       if (lesson.date && lesson.date > day) return;
       lesson.forms.forEach(function (form) {
-        plain(form.he).split(/[^\u05D0-\u05EA]+/).forEach(function (word) { if (word) seen[word] = true; });
+        hebrewWords(form.he).forEach(function (word) { seen[word] = true; });
       });
     });
     return seen;
   }
 
-  // The same word for everyone on a given day. The list is walked in a fixed
-  // mixed order, one step a day, so no word repeats until all have been shown;
-  // a word the class has already met in a lesson is passed over.
+  // The Hebrew of those lessons, to look for a phrase in: " word word | word \u2026 ".
+  function taughtText(day) {
+    var text = " ";
+    lessons.forEach(function (lesson) {
+      if (lesson.date && lesson.date > day) return;
+      lesson.forms.forEach(function (form) { text += hebrewWords(form.he).join(" ") + " | "; });
+    });
+    return text;
+  }
+
+  function dayNumber(date) {
+    return Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000);
+  }
+
+  // The same word or phrase for everyone on a given day. Each list is walked
+  // in a fixed mixed order, one step each time, so nothing repeats until all
+  // have been shown; one the class has already met in a lesson is passed over.
+  // Words keep the order they had before phrases came in.
   function wordOfDay(day) {
     var date = parseDay(day);
-    var order = dailyWords ? dailyWords.order : [];
-    if (!date || !order.length) return null;
-    var taught = taughtWords(day);
-    var start = Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000);
-    for (var i = 0; i < order.length; i++) {
-      var item = order[(start + i) % order.length];
-      if (!taught[plain(item.row.forms[0].he)]) return item;
+    if (!date) return null;
+    var step = dayNumber(date);
+    var from = dayNumber(parseDay(PHRASES_FROM));
+    if (step > from && dailyPhrases) {
+      var since = step - from;
+      if (since % 2) {
+        var text = taughtText(day);
+        return pickOfDay(dailyPhrases.order, (since - 1) / 2, function (item) {
+          return text.indexOf(" " + hebrewWords(item.row.forms[0].he).join(" ") + " ") >= 0;
+        });
+      }
+      step = from + since / 2;
     }
-    return order[start % order.length];
+    var taught = taughtWords(day);
+    return pickOfDay(dailyWords ? dailyWords.order : [], step, function (item) {
+      return taught[plain(item.row.forms[0].he)];
+    });
+  }
+
+  function pickOfDay(order, step, taught) {
+    if (!order.length) return null;
+    for (var i = 0; i < order.length; i++) {
+      var item = order[(step + i) % order.length];
+      if (!taught(item)) return item;
+    }
+    return order[step % order.length];
   }
 
   function practisedKey(day) {
@@ -2484,6 +2533,7 @@
       state.wotd = entry && {
         day: day,
         row: entry.row,
+        phrase: !!entry.row.phrase,
         form: entry.row.forms[0],
         step: "learn",
         options: null,
@@ -2505,7 +2555,7 @@
   // Today's word and the past week's: a student who missed a day can catch up.
   function renderWordDays(days, chosen) {
     return el("div", { class: "wotd-days no-print" }, [
-      el("p", { class: "wotd-days-title", id: "wotd-days-title", text: t("Catch up on the past week's words") }),
+      el("p", { class: "wotd-days-title", id: "wotd-days-title", text: t("Catch up on the past week's words and phrases") }),
       el("div", { class: "wotd-day-list", role: "group", "aria-labelledby": "wotd-days-title" }, days.map(function (day, i) {
         var done = practisedWord(day);
         var date = parseDay(day);
@@ -2539,23 +2589,25 @@
       off: t(NOT_SWITCHED_ON),
       pin: backendMessage({ error: "sign-in" })
     }[w.saved];
+    var tomorrow = isToday && done && wordOfDay(dayKey(addDays(parseDay(w.day), 1)));
+    var comeBack = tomorrow && tomorrow.row.phrase ? t("Practised today. Come back tomorrow for a new phrase.") : t("Practised today. Come back tomorrow for a new word.");
     return el("div", null, [
       el("div", { class: "card word-card wotd-card" }, [
-        el("p", { class: "card-section", text: t("Word of the day") + " · " + formatDate(w.day) }),
+        el("p", { class: "card-section", text: (w.phrase ? t("Phrase of the day") : t("Word of the day")) + " · " + formatDate(w.day) }),
         cardBody(w.row)
       ]),
-      done ? el("p", { class: "notice good", role: "status", text: isToday ? t("Practised today. Come back tomorrow for a new word.") : t("You've practised this word.") }) : null,
+      done ? el("p", { class: "notice good", role: "status", text: isToday ? comeBack : w.phrase ? t("You've practised this phrase.") : t("You've practised this word.") }) : null,
       savedText ? el("p", { class: "send-status" + (w.saved === "saving" || w.saved === "saved" ? "" : " bad"), text: savedText }) : null,
       !state.student ? el("p", { class: "hint", text: t("You're signed in as the teacher, so your practice isn't recorded.") }) : null,
       el("div", { class: "actions wotd-actions" }, [
         el("button", {
           class: "btn" + (done ? "" : " primary"),
           type: "button",
-          text: done ? t("Practise again") : t("Practise this word"),
+          text: done ? t("Practise again") : w.phrase ? t("Practise this phrase") : t("Practise this word"),
           onclick: function () {
             w.step = "ask";
             w.picked = null;
-            w.options = makeOptions(w.form, dailyWords.forms);
+            w.options = makeOptions(w.form, (w.phrase ? dailyPhrases : dailyWords).forms);
             stopSpeaking();
             render();
           }
@@ -2582,10 +2634,10 @@
       ]);
     }));
     return el("div", { class: "card" }, [
-      el("p", { class: "quiz-progress", text: t("Word of the day · Which one is it?") }),
+      el("p", { class: "quiz-progress", text: w.phrase ? t("Phrase of the day · Which one is it?") : t("Word of the day · Which one is it?") }),
       el("p", { class: "prompt", text: promptFor(w.form) }),
       options,
-      wrong ? el("p", { class: "feedback bad", role: "status", text: t("Not quite. Look at the word again, then try once more.") }) : null,
+      wrong ? el("p", { class: "feedback bad", role: "status", text: w.phrase ? t("Not quite. Look at the phrase again, then try once more.") : t("Not quite. Look at the word again, then try once more.") }) : null,
       wrong ? el("div", { class: "actions" }, [
         el("button", { class: "btn primary", type: "button", text: t("Back"), onclick: function () { w.step = "learn"; render(); } })
       ]) : null

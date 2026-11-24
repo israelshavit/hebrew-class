@@ -1,0 +1,52 @@
+// Short phrases for the Word of the day: every other day it brings one of
+// these instead of a single word (see PHRASES_FROM in app.js). Each row is
+// ["English", "Transliteration", "Hebrew", "Spanish"], with niqqud on the
+// Hebrew, about family and positive things. They're shown in a mixed order
+// that goes through the whole list before repeating, and a phrase a lesson
+// taught so far already has is skipped, so add or remove rows freely. Keep
+// each English and Spanish different from the others' (the check asks which
+// Hebrew is which), and avoid phrases that change with the speaker's gender.
+HebrewClass.setDailyPhrases([
+  {
+    title: "Family",
+    es: { title: "Familia" },
+    rows: [
+      ["My family", "Ha-mishpacha sheli", "הַמִּשְׁפָּחָה שֶׁלִּי", "Mi familia"],
+      ["The whole family", "Kol ha-mishpacha", "כָּל הַמִּשְׁפָּחָה", "Toda la familia"],
+      ["Family is everything", "Ha-mishpacha hi ha-kol", "הַמִּשְׁפָּחָה הִיא הַכֹּל", "La familia lo es todo"],
+      ["A happy family", "Mishpacha me'usheret", "מִשְׁפָּחָה מְאֻשֶּׁרֶת", "Una familia feliz"],
+      ["My parents", "Ha-horim sheli", "הַהוֹרִים שֶׁלִּי", "Mis padres"],
+      ["My big brother", "Ha-ach ha-gadol sheli", "הָאָח הַגָּדוֹל שֶׁלִּי", "Mi hermano mayor"],
+      ["My little sister", "Ha-achot ha-ktana sheli", "הָאָחוֹת הַקְּטַנָּה שֶׁלִּי", "Mi hermana menor"],
+      ["Grandpa and Grandma", "Saba ve-savta", "סַבָּא וְסַבְתָּא", "El abuelo y la abuela"],
+      ["My home", "Ha-bayit sheli", "הַבַּיִת שֶׁלִּי", "Mi casa"],
+      ["Family dinner", "Aruchat erev mishpachtit", "אֲרוּחַת עֶרֶב מִשְׁפַּחְתִּית", "Cena familiar"],
+      ["Good friends", "Chaverim tovim", "חֲבֵרִים טוֹבִים", "Buenos amigos"],
+      ["Good night", "Layla tov", "לַיְלָה טוֹב", "Buenas noches"],
+      ["Sweet dreams", "Chalomot paz", "חֲלוֹמוֹת פָּז", "Dulces sueños"],
+      ["Happy birthday", "Yom huledet same'ach", "יוֹם הֻלֶּדֶת שָׂמֵחַ", "Feliz cumpleaños"],
+      ["Welcome (to everyone)", "Bruchim ha-ba'im", "בְּרוּכִים הַבָּאִים", "Bienvenidos"]
+    ]
+  },
+  {
+    title: "Positive phrases",
+    es: { title: "Frases positivas" },
+    rows: [
+      ["Thank you very much", "Toda raba", "תּוֹדָה רַבָּה", "Muchas gracias"],
+      ["Congratulations!", "Mazal tov!", "מַזָּל טוֹב!", "¡Felicidades!"],
+      ["Well done!", "Kol ha-kavod!", "כָּל הַכָּבוֹד!", "¡Bien hecho!"],
+      ["Have a nice day", "Yom na'im", "יוֹם נָעִים", "Que tengas un buen día"],
+      ["Have a good week", "Shavua tov", "שָׁבוּעַ טוֹב", "Buena semana"],
+      ["Happy holiday", "Chag same'ach", "חַג שָׂמֵחַ", "Felices fiestas"],
+      ["Happy New Year", "Shana tova", "שָׁנָה טוֹבָה", "Feliz año nuevo"],
+      ["All the best", "Kol tuv", "כָּל טוּב", "Todo lo mejor"],
+      ["Everything will be OK", "Yihye be-seder", "יִהְיֶה בְּסֵדֶר", "Todo va a estar bien"],
+      ["Get well soon", "Refu'a shlema", "רְפוּאָה שְׁלֵמָה", "Que te mejores pronto"],
+      ["See you soon", "Lehitra'ot be-karov", "לְהִתְרָאוֹת בְּקָרוֹב", "Nos vemos pronto"],
+      ["Peace and love", "Shalom ve-ahava", "שָׁלוֹם וְאַהֲבָה", "Paz y amor"],
+      ["Lots of love", "Hamon ahava", "הָמוֹן אַהֲבָה", "Mucho amor"],
+      ["A warm hug", "Chibuk cham", "חִבּוּק חַם", "Un abrazo cálido"],
+      ["A big smile", "Chiyuch gadol", "חִיּוּךְ גָּדוֹל", "Una gran sonrisa"]
+    ]
+  }
+]);

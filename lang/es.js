@@ -228,7 +228,13 @@ window.HebrewClass.text.es = {
 
   // Word of the day
   "There is no word of the day yet.": "Todavía no hay palabra del día.",
-  "Catch up on the past week's words": "Ponte al día con las palabras de la última semana",
+  "Catch up on the past week's words and phrases": "Ponte al día con las palabras y frases de la última semana",
+  "Phrase of the day": "Frase del día",
+  "Practised today. Come back tomorrow for a new phrase.": "Ya practicaste hoy. Vuelve mañana para una frase nueva.",
+  "You've practised this phrase.": "Ya practicaste esta frase.",
+  "Practise this phrase": "Practicar esta frase",
+  "Phrase of the day · Which one is it?": "Frase del día · ¿Cuál es?",
+  "Not quite. Look at the phrase again, then try once more.": "Casi. Mira la frase otra vez y vuelve a intentarlo.",
   "Today": "Hoy",
   "Yesterday": "Ayer",
   ", practised": ", practicada",
