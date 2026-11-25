@@ -104,53 +104,65 @@
   }
 
   /* ---------- Interface language ----------
-     English or Spanish, chosen on each browser with the menu in the top bar.
-     lang/es.js has the Spanish for each English text; anything missing there
-     shows in English. Hebrew is still what's taught: in Spanish, a lesson's
-     meanings, titles and notes come from its Spanish ("es") parts. */
+     English, Spanish or (Brazilian) Portuguese, chosen on each browser with
+     the menu in the top bar. lang/es.js and lang/pt.js have the Spanish and
+     the Portuguese for each English text; anything missing there shows in
+     English. Hebrew is still what's taught: in Spanish or Portuguese, a
+     lesson's meanings, titles and notes come from its "es" or "pt" parts. */
 
-  var LANGUAGES = [{ code: "en", name: "English" }, { code: "es", name: "Español" }];
-  // English until someone chooses Español on this browser.
-  var uiLang = readSetting("hebrewClass.lang", "") === "es" ? "es" : "en";
+  var LANGUAGES = [
+    { code: "en", name: "English", locale: undefined, speech: "en-US" },
+    { code: "es", name: "Español", locale: "es", speech: "es-MX", english: "Spanish" },
+    { code: "pt", name: "Português", locale: "pt-BR", speech: "pt-BR", english: "Portuguese" }
+  ];
+
+  function language(code) {
+    for (var i = 0; i < LANGUAGES.length; i++) if (LANGUAGES[i].code === code) return LANGUAGES[i];
+    return null;
+  }
+
+  // English until someone chooses another language on this browser.
+  var uiLang = language(readSetting("hebrewClass.lang", "")) ? readSetting("hebrewClass.lang", "") : "en";
   var missingText = {};
   setPageLanguage(uiLang);
 
-  // The page's language, for the browser. In Spanish the whole page is marked
-  // not to be translated, as the teacher asked: the student chose Spanish, so
-  // Chrome shouldn't offer to turn it into English. In English, Chrome may
-  // still translate the interface, but never Hebrew or transliteration (el()
-  // and mixed() mark them).
+  // The page's language, for the browser. In Spanish or Portuguese the whole
+  // page is marked not to be translated, as the teacher asked: the student
+  // chose that language, so Chrome shouldn't offer to turn it into English.
+  // In English, Chrome may still translate the interface, but never Hebrew or
+  // transliteration (el() and mixed() mark them).
   function setPageLanguage(code) {
     var root = document.documentElement;
+    var keep = code !== "en";
     root.lang = code;
-    if (code === "es") root.setAttribute("translate", "no");
+    if (keep) root.setAttribute("translate", "no");
     else root.removeAttribute("translate");
-    root.classList.toggle("notranslate", code === "es"); // the same, for older Chrome
+    root.classList.toggle("notranslate", keep); // the same, for older Chrome
   }
 
   // The interface text in the chosen language; {name} is filled in from vars.
-  // "Live class|menu" is "Live class" in English, with its own Spanish (a
-  // shorter one, for the top menu to fit across a phone).
+  // "Live class|menu" is "Live class" in English, with its own Spanish and
+  // Portuguese (shorter ones, for the top menu to fit across a phone).
   function t(text, vars) {
     var out = text.split("|")[0];
-    if (uiLang === "es") {
-      var table = (HC.text && HC.text.es) || {};
+    if (uiLang !== "en") {
+      var table = (HC.text && HC.text[uiLang]) || {};
       if (Object.prototype.hasOwnProperty.call(table, text)) out = table[text];
-      else if (config.testing && !missingText[text]) {
-        missingText[text] = true;
-        console.warn("No Spanish yet for: " + text); // on localhost only, to catch new text
+      else if (config.testing && !missingText[uiLang + text]) {
+        missingText[uiLang + text] = true;
+        console.warn("No " + language(uiLang).english + " yet for: " + text); // on localhost only, to catch new text
       }
     }
     return vars ? out.replace(/\{(\w+)\}/g, function (m, key) { return key in vars ? String(vars[key]) : m; }) : out;
   }
 
-  // Dates: the browser's own format in English, Spanish month and day names in Spanish.
+  // Dates: the browser's own format in English; Spanish or Brazilian month and day names.
   function dateLocale() {
-    return uiLang === "es" ? "es" : undefined;
+    return language(uiLang).locale;
   }
 
   function setLanguage(code) {
-    if (code === uiLang || (code !== "en" && code !== "es")) return;
+    if (code === uiLang || !language(code)) return;
     uiLang = code;
     writeSetting("hebrewClass.lang", code);
     setPageLanguage(code);
@@ -199,9 +211,10 @@
 
   // Rows are ["English", "translit", "Hebrew"], or for male/female forms
   // ["English (m/f)", ["translit m", "translit f"], ["Hebrew m", "Hebrew f"]].
-  // A fourth item is the meaning in Spanish. A lesson and each of its sections
-  // can have es: { title, subtitle, notes, explanation } in Spanish. A lesson's
-  // picture is { src, title, width, height } (es: { picture } for its Spanish copy).
+  // A fourth item is the meaning in Spanish, a fifth in Portuguese. A lesson and
+  // each of its sections can have es: { title, subtitle, notes, explanation }
+  // in Spanish, and pt: { … } in Portuguese. A lesson's picture is
+  // { src, title, width, height } (es: { picture } for its Spanish copy, and so on).
   function normalizeLesson(raw) {
     var forms = [];
     var sections = (raw.sections || []).map(function (section, si) {
@@ -209,8 +222,9 @@
         title: section.title,
         explanation: section.explanation || "",
         es: section.es || {},
+        pt: section.pt || {},
         rows: (section.rows || []).map(function (r, ri) {
-          var row = { id: si + "-" + ri, en: r[0], es: r[3] || "", forms: [] };
+          var row = { id: si + "-" + ri, en: r[0], es: r[3] || "", pt: r[4] || "", forms: [] };
           var tr = r[1];
           var he = r[2];
           if (Array.isArray(he)) {
@@ -240,6 +254,7 @@
       notes: raw.notes || "",
       picture: raw.picture || null,
       es: raw.es || {},
+      pt: raw.pt || {},
       sections: sections,
       forms: forms
     };
@@ -277,14 +292,19 @@
   }
 
   // A lesson's or section's title, subtitle, notes or explanation in the
-  // interface language, when the lesson file has it in Spanish.
+  // interface language, when the lesson file has it in that language.
   function localText(item, field) {
-    return (uiLang === "es" && item.es && item.es[field]) || item[field];
+    var own = uiLang !== "en" && item[uiLang];
+    return (own && own[field]) || item[field];
   }
 
-  // A phrase's meaning: its Spanish in Spanish (when the row has it), otherwise its English.
-  function meaning(row, language) {
-    return ((language || uiLang) === "es" && row.es) || row.en;
+  // A phrase's meaning in the interface language (or the one asked for), when
+  // the row has it; otherwise its English. A meaning given as [male, female]
+  // (where the Spanish or Portuguese itself changes) shows both: "a / b".
+  function meaning(row, code) {
+    code = code || uiLang;
+    var own = code !== "en" && row[code];
+    return (Array.isArray(own) ? own.join(" / ") : own) || row.en;
   }
 
   // "Lesson 2 – Small Talk"
@@ -483,26 +503,29 @@
   }
 
   // A row's gender marks: "(to m/f)" for talking to a man or a woman (in
-  // Spanish "(a él/ella)"), and "(m/f)" for a male or female speaker.
-  var TO_MARK = /\s*\((?:to m\/f|a él\/ella)\)/;
+  // Spanish "(a él/ella)", in Portuguese "(para ele/ela)"), and "(m/f)" for a
+  // male or female speaker.
+  var TO_MARK = /\s*\((?:to m\/f|a él\/ella|para ele\/ela)\)/;
   var MF_MARK = /\s*\(m\/f\)/;
   var GENDER_WORDS = {
     en: { toM: "(to a man)", toF: "(to a woman)", m: "(male)", f: "(female)" },
-    es: { toM: "(a un hombre)", toF: "(a una mujer)", m: "(hombre)", f: "(mujer)" }
+    es: { toM: "(a un hombre)", toF: "(a una mujer)", m: "(hombre)", f: "(mujer)" },
+    pt: { toM: "(para um homem)", toF: "(para uma mulher)", m: "(homem)", f: "(mulher)" }
   };
 
   // The prompt for one form, in the interface language or the one asked for
   // (quiz misses are saved in English for the teacher), making the gender
-  // explicit. In Spanish, "cansado/a" becomes "cansado" or "cansada".
-  function promptFor(form, language) {
-    language = language === "en" || language === "es" ? language : uiLang;
+  // explicit. In Spanish or Portuguese, "cansado/a" becomes "cansado" or "cansada".
+  function promptFor(form, code) {
+    code = language(code) ? code : uiLang;
     var row = form.row;
-    var text = meaning(row, language);
+    var text = meaning(row, code);
     if (!form.g) return text;
     var male = form.g === "m";
-    var words = GENDER_WORDS[language];
-    if (language === "es" && row.es) {
-      text = text.replace(/([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)\/a(?![A-Za-zÁÉÍÓÚÜÑáéíóúüñ])/g, function (m, word) {
+    if (code !== "en" && Array.isArray(row[code])) text = row[code][male ? 0 : 1] || text;
+    var words = GENDER_WORDS[code];
+    if (code !== "en" && row[code]) {
+      text = text.replace(/([A-Za-zÀ-ÖØ-öø-ÿ]+)\/a(?![A-Za-zÀ-ÖØ-öø-ÿ])/g, function (m, word) {
         return male ? word : /o$/.test(word) ? word.slice(0, -1) + "a" : word + "a";
       });
     }
@@ -2759,8 +2782,8 @@
     render();
     var from = uiLang; // the language the phrase is typed or said in
     callBackend({ action: "translate", text: text, from: from }).then(function (res) {
-      if (res && res.ok && res.hebrew && from === "es" && res.from !== "es") {
-        // A Google script from before Spanish translates from English only.
+      if (res && res.ok && res.hebrew && from !== "en" && res.from !== from) {
+        // A Google script from before this language translates from English (or Spanish) only.
         say.error = t(NOT_SWITCHED_ON);
       } else if (res && res.ok && res.hebrew) {
         say.result = { text: res.text || text, hebrew: res.hebrew };
@@ -2783,7 +2806,7 @@
     var heard = "";
     var rec = new Recognition();
     recognition = rec;
-    rec.lang = uiLang === "es" ? spanishSpeech() : "en-US";
+    rec.lang = speechLanguage();
     rec.interimResults = false;
     rec.maxAlternatives = 1;
     rec.onresult = function (e) {
@@ -2816,11 +2839,13 @@
     render();
   }
 
-  // Spoken Spanish: the device's own kind (es-AR, es-ES…) if it is set to
-  // Spanish, otherwise Mexican Spanish, which Chrome, Edge and Safari all know.
-  function spanishSpeech() {
+  // The spoken language: in Spanish or Portuguese, the device's own kind
+  // (es-AR, pt-PT…) if it is set to that language, otherwise Mexican Spanish or
+  // Brazilian Portuguese, which Chrome, Edge and Safari all know.
+  function speechLanguage() {
     var device = navigator.language || "";
-    return /^es-/i.test(device) ? device : "es-MX";
+    if (uiLang !== "en" && device.toLowerCase().indexOf(uiLang + "-") === 0) return device;
+    return language(uiLang).speech;
   }
 
   function stopListening() {
@@ -2997,10 +3022,15 @@
   /* ---------- Progress reports ---------- */
 
   var WEEKS_SHOWN = 26;
-  var DAY_LETTERS = { en: ["S", "M", "T", "W", "T", "F", "S"], es: ["D", "L", "M", "X", "J", "V", "S"] };
+  var DAY_LETTERS = {
+    en: ["S", "M", "T", "W", "T", "F", "S"],
+    es: ["D", "L", "M", "X", "J", "V", "S"],
+    pt: ["D", "S", "T", "Q", "Q", "S", "S"]
+  };
   var DAY_NAMES = {
     en: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
-    es: ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"]
+    es: ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"],
+    pt: ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"]
   };
 
   // Weeks run Sunday to Saturday.

@@ -12,50 +12,54 @@ HebrewClass.addLesson({
     notes: "En hebreo, las palabras cambian según el género. (a él/ella) da la forma para hablarle a un hombre y luego a una mujer.",
     picture: { src: "lessons/pictures/2026-11-22-family-tree-es.svg", title: "Árbol genealógico", width: 1000, height: 466 }
   },
+  pt: { title: "Hebraico de conversação: vocabulário essencial da família", subtitle: "Guia de referência para praticar em grupo", notes: "Em hebraico, as palavras mudam conforme o gênero. (para ele/ela) dá a forma para falar com um homem e depois com uma mulher.", picture: { src: "lessons/pictures/2026-11-22-family-tree-pt.svg", title: "Árvore genealógica", width: 1000, height: 466 } },
   sections: [
     {
       title: "Immediate Family – מִשְׁפָּחָה קְרוֹבָה",
       explanation: "Ima and aba are what Israelis call their parents at any age, children and adults alike.\nAchim is the plural of ach: brothers, or brothers and sisters together. A mixed group always takes the masculine plural.\nYesh li… (I have…) is literally \"there is to me\".",
       es: { title: "La familia cercana – מִשְׁפָּחָה קְרוֹבָה", explanation: "Ima y aba es como los israelíes les dicen a sus padres a cualquier edad, tanto niños como adultos.\nAchim es el plural de ach: hermanos varones, o hermanos y hermanas juntos. Como en español, un grupo mixto lleva el plural masculino.\nYesh li… (tengo…) es literalmente “hay para mí”." },
+      pt: { title: "A família próxima – מִשְׁפָּחָה קְרוֹבָה", explanation: "Ima e aba é como os israelenses chamam a mãe e o pai em qualquer idade, tanto crianças quanto adultos.\nAchim é o plural de ach: irmãos, ou irmãos e irmãs juntos. Como em português, um grupo misto leva o plural masculino.\nYesh li… (eu tenho…) é literalmente “há para mim”." },
       rows: [
-        ["Family", "Mishpacha", "מִשְׁפָּחָה", "Familia"],
-        ["Big family", "Mishpacha gdola", "מִשְׁפָּחָה גְּדוֹלָה", "Familia grande"],
-        ["Mom", "Ima", "אִמָּא", "Mamá"],
-        ["Dad", "Aba", "אַבָּא", "Papá"],
-        ["Brother", "Ach", "אָח", "Hermano"],
-        ["Sister", "Achot", "אָחוֹת", "Hermana"],
-        ["Siblings", "Achim", "אַחִים", "Hermanos"],
-        ["Son", "Ben", "בֵּן", "Hijo"],
-        ["Daughter", "Bat", "בַּת", "Hija"],
-        ["I have a brother and a sister.", "Yesh li ach ve-achot.", "יֵשׁ לִי אָח וְאָחוֹת.", "Tengo un hermano y una hermana."]
+        ["Family", "Mishpacha", "מִשְׁפָּחָה", "Familia", "Família"],
+        ["Big family", "Mishpacha gdola", "מִשְׁפָּחָה גְּדוֹלָה", "Familia grande", "Família grande"],
+        ["Mom", "Ima", "אִמָּא", "Mamá", "Mamãe"],
+        ["Dad", "Aba", "אַבָּא", "Papá", "Papai"],
+        ["Brother", "Ach", "אָח", "Hermano", "Irmão"],
+        ["Sister", "Achot", "אָחוֹת", "Hermana", "Irmã"],
+        ["Siblings", "Achim", "אַחִים", "Hermanos", "Irmãos"],
+        ["Son", "Ben", "בֵּן", "Hijo", "Filho"],
+        ["Daughter", "Bat", "בַּת", "Hija", "Filha"],
+        ["I have a brother and a sister.", "Yesh li ach ve-achot.", "יֵשׁ לִי אָח וְאָחוֹת.", "Tengo un hermano y una hermana.", "Eu tenho um irmão e uma irmã."]
       ]
     },
     {
       title: "Extended Family – מִשְׁפָּחָה מוּרְחֶבֶת",
       explanation: "Ben dod is literally \"son of an uncle\" and bat doda \"daughter of an aunt\". Cousins in general are bney dodim: ben becomes bney in the plural.\nAchyan (nephew) and achyanit (niece) come from ach (brother).",
       es: { title: "La familia extendida – מִשְׁפָּחָה מוּרְחֶבֶת", explanation: "Ben dod es literalmente “hijo de tío” y bat doda “hija de tía”. Los primos en general son bney dodim: ben se vuelve bney en plural.\nAchyan (sobrino) y achyanit (sobrina) vienen de ach (hermano)." },
+      pt: { title: "A família estendida – מִשְׁפָּחָה מוּרְחֶבֶת", explanation: "Ben dod é literalmente “filho de tio” e bat doda “filha de tia”. Primos em geral são bney dodim: ben vira bney no plural.\nAchyan (sobrinho) e achyanit (sobrinha) vêm de ach (irmão)." },
       rows: [
-        ["Grandpa", "Saba", "סַבָּא", "Abuelo"],
-        ["Grandma", "Savta", "סַבְתָּא", "Abuela"],
-        ["Uncle", "Dod", "דּוֹד", "Tío"],
-        ["Aunt", "Doda", "דּוֹדָה", "Tía"],
-        ["Male cousin", "Ben dod", "בֶּן דּוֹד", "Primo"],
-        ["Female cousin", "Bat doda", "בַּת דּוֹדָה", "Prima"],
-        ["Nephew", "Achyan", "אַחְיָן", "Sobrino"],
-        ["Niece", "Achyanit", "אַחְיָנִית", "Sobrina"],
-        ["I have a lot of cousins.", "Yesh li harbe bney dodim.", "יֵשׁ לִי הַרְבֵּה בְּנֵי דּוֹדִים.", "Tengo muchos primos."]
+        ["Grandpa", "Saba", "סַבָּא", "Abuelo", "Avô"],
+        ["Grandma", "Savta", "סַבְתָּא", "Abuela", "Avó"],
+        ["Uncle", "Dod", "דּוֹד", "Tío", "Tio"],
+        ["Aunt", "Doda", "דּוֹדָה", "Tía", "Tia"],
+        ["Male cousin", "Ben dod", "בֶּן דּוֹד", "Primo", "Primo"],
+        ["Female cousin", "Bat doda", "בַּת דּוֹדָה", "Prima", "Prima"],
+        ["Nephew", "Achyan", "אַחְיָן", "Sobrino", "Sobrinho"],
+        ["Niece", "Achyanit", "אַחְיָנִית", "Sobrina", "Sobrinha"],
+        ["I have a lot of cousins.", "Yesh li harbe bney dodim.", "יֵשׁ לִי הַרְבֵּה בְּנֵי דּוֹדִים.", "Tengo muchos primos.", "Eu tenho muitos primos."]
       ]
     },
     {
       title: "Relationships & Status – זוּגִיּוּת",
       explanation: "The ending -i means \"my\": ba'al → ba'ali (my husband), isha → ishti (my wife).\n\"This is\" agrees with the person: ze for a man, zot for a woman.\nNasui (married) agrees with who you ask: ata nasui? to a man, at nesu'a? to a woman.",
       es: { title: "Pareja y estado civil – זוּגִיּוּת", explanation: "La terminación -i significa “mi”: ba'al → ba'ali (mi esposo), isha → ishti (mi esposa).\n“Este/Esta es” concuerda con la persona: ze para un hombre, zot para una mujer.\nNasui (casado) concuerda con la persona a quien le preguntas: ata nasui? a un hombre, at nesu'a? a una mujer." },
+      pt: { title: "Relacionamento e estado civil – זוּגִיּוּת", explanation: "A terminação -i quer dizer “meu/minha”: ba'al → ba'ali (meu marido), isha → ishti (minha esposa).\n“Este/Esta é” concorda com a pessoa: ze para um homem, zot para uma mulher.\nNasui (casado) concorda com quem você pergunta: ata nasui? para um homem, at nesu'a? para uma mulher." },
       rows: [
-        ["Husband", "Ba'al", "בַּעַל", "Esposo"],
-        ["Wife", "Isha", "אִשָּׁה", "Esposa"],
-        ["This is my husband.", "Ze ba'ali.", "זֶה בַּעֲלִי.", "Este es mi esposo."],
-        ["This is my wife.", "Zot ishti.", "זֹאת אִשְׁתִּי.", "Esta es mi esposa."],
-        ["Are you married? (to m/f)", ["Ata nasui?", "At nesu'a?"], ["אַתָּה נָשׂוּי?", "אַתְּ נְשׂוּאָה?"], "¿Estás casado/a? (a él/ella)"]
+        ["Husband", "Ba'al", "בַּעַל", "Esposo", "Marido"],
+        ["Wife", "Isha", "אִשָּׁה", "Esposa", "Esposa"],
+        ["This is my husband.", "Ze ba'ali.", "זֶה בַּעֲלִי.", "Este es mi esposo.", "Este é meu marido."],
+        ["This is my wife.", "Zot ishti.", "זֹאת אִשְׁתִּי.", "Esta es mi esposa.", "Esta é minha esposa."],
+        ["Are you married? (to m/f)", ["Ata nasui?", "At nesu'a?"], ["אַתָּה נָשׂוּי?", "אַתְּ נְשׂוּאָה?"], "¿Estás casado/a? (a él/ella)", "Você é casado/a? (para ele/ela)"]
       ]
     }
   ]

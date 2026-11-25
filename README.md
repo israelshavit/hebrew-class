@@ -16,31 +16,31 @@ Across the whole site (menu at the top of every page):
 - **Download PDF** on a report opens the browser's print window; choose "Save as PDF" there. The teacher can save the class report or one student's.
 - **Share** (in the top menu) sends the site's link (`siteUrl` in `config.js`) by the phone's share menu (on phones and tablets), WhatsApp, email or a copied link. A signed-in student's link is their own (see **Invites** below).
 - **Add to home screen** (in the Self study menu, next to Suggestions) puts a Hebrew Class icon (`manifest.json`, `icons/`) on the phone: Chrome's install button there, or the steps for an iPhone. Chrome no longer offers it by itself when the site opens. The icon opens the site full screen like an app, on the Lessons page. On iPhone it keeps its own sign-in, apart from Safari's.
-- **English / Español** (the menu in the blue top bar, also before signing in): the interface language, remembered on each device. It's English until someone chooses Español. See [English and Spanish](#english-and-spanish).
+- **English / Español / Português** (the menu in the blue top bar, also before signing in): the interface language, remembered on each device. It's English until someone chooses another. See [English, Spanish and Portuguese](#english-spanish-and-portuguese).
 
 There is no build step. Open `index.html` in a browser to try it locally.
 
 ## Adding a lesson
 
 1. Copy a file in `lessons/` and name it `YYYY-MM-DD-topic.js`.
-2. Fill in its rows. A row is `["English", "Transliteration", "Hebrew", "Spanish"]`. For male/female forms use
-   `["English (m/f)", ["translit m", "translit f"], ["Hebrew m", "Hebrew f"], "Spanish (m/f)"]`; write `(to m/f)` when the forms depend on who you're talking to (in the Spanish, `(a él/ella)`). In the Spanish, `cansado/a` shows as "cansado" or "cansada" in the quiz.
+2. Fill in its rows. A row is `["English", "Transliteration", "Hebrew", "Spanish", "Portuguese"]`. For male/female forms use
+   `["English (m/f)", ["translit m", "translit f"], ["Hebrew m", "Hebrew f"], "Spanish (m/f)", "Portuguese (m/f)"]`; write `(to m/f)` when the forms depend on who you're talking to (in the Spanish `(a él/ella)`, in the Portuguese `(para ele/ela)`). In the Spanish or Portuguese, `cansado/a` shows as "cansado" or "cansada" in the quiz; where more changes, give both: `["Este é meu amigo", "Esta é minha amiga"]`.
    A section can have an `explanation` (shown above its phrases on the sheet, and under the buttons in Word by word). Set `video` (and `videoTitle`) to link the lesson's video: it appears at the end of the sheet and under Self study → Resources.
-   A lesson can also have a `picture`: `{ src, title, width, height }`, with the image in `lessons/pictures/` and its size in pixels (an SVG's `viewBox`), and its Spanish copy in `es.picture`. It appears under the table on the sheet's last page, shrinking with the text so the sheet still fits, and under Self study → Resources, where it can be opened full size.
-   The lesson and each section also get `es: { ... }` with their title, subtitle, notes and explanation in Spanish (copy an existing lesson).
+   A lesson can also have a `picture`: `{ src, title, width, height }`, with the image in `lessons/pictures/` and its size in pixels (an SVG's `viewBox`), and its Spanish and Portuguese copies in `es.picture` and `pt.picture`. It appears under the table on the sheet's last page, shrinking with the text so the sheet still fits, and under Self study → Resources, where it can be opened full size.
+   The lesson and each section also get `es: { ... }` and `pt: { ... }` with their title, subtitle, notes and explanation in Spanish and Portuguese (copy an existing lesson).
 3. Add the file name (without `.js`) to `lessons/index.js`. Lessons are numbered by date: the oldest is shown as "Lesson 1".
 4. Change the version in `version.js` (the date and time will do), then commit and push. GitHub Pages updates the site in a minute or two, and a page already open on a phone or computer reloads itself to get it the next time it comes back on screen (except in the middle of a quiz or with something typed and not sent; then it waits for the next time).
 
-## English and Spanish
+## English, Spanish and Portuguese
 
-Each student picks **English** or **Español** in the top bar. Hebrew is what everyone learns; the language only changes what's around it:
+Each student picks **English**, **Español** or **Português** (Brazilian) in the top bar. Hebrew is what everyone learns; the language only changes what's around it:
 
-- **Everything a student sees** switches: menus, sign-in and PIN help, quizzes, Word of the day, How to say, Live class, My progress and its PDF, Share, Suggestions and the championship board. The interface text is in `lang/es.js` ("English": "Spanish" per line). Text missing there shows in English, and on `localhost` the browser console lists it ("No Spanish yet for …").
-- **The lessons**: in Spanish the sheet, Word by word, the quizzes and the Word of the day show each phrase's Spanish (the fourth item of a row) instead of the English, and the lesson's Spanish title, notes and explanations.
-- **How to say** takes typed or spoken Spanish. It needs the latest `Code.gs`; with an older one, a student using Spanish is told it isn't switched on yet.
-- **PIN emails**: the reset code comes in the language the student is using. The temporary PIN you send from the Teacher page is in both languages.
-- **The Teacher page stays in English.** Quiz misses are saved in English, so your reports read the same whichever language a student uses; a student in Spanish sees their own misses in Spanish.
-- **Chrome's Translate**: Chrome can offer to translate a page into the reader's own language. It never touches the Hebrew, the transliteration or students' names, so the lessons stay as taught. In Spanish, Chrome doesn't translate the page at all, since the student chose Spanish. In English it may still translate the menus and instructions for a student who reads another language better. The Teacher page is never translated.
+- **Everything a student sees** switches: menus, sign-in and PIN help, quizzes, Word of the day, How to say, Live class, My progress and its PDF, Share, Suggestions and the championship board. The interface text is in `lang/es.js` and `lang/pt.js` ("English": "Spanish" or "Portuguese" per line). Text missing there shows in English, and on `localhost` the browser console lists it ("No Spanish yet for …", "No Portuguese yet for …"). In `lang/pt.js`, the words in [brackets] name the teacher, set in one place at the end of the file ("o professor", as the teacher asked).
+- **The lessons**: in Spanish or Portuguese the sheet, Word by word, the quizzes and the Word of the day show each phrase's Spanish or Portuguese (the fourth or fifth item of a row) instead of the English, and the lesson's own title, notes, explanations and picture in that language.
+- **How to say** takes typed or spoken Spanish or Portuguese. It needs the latest `Code.gs`; with an older one, a student using Portuguese (or Spanish, before that) is told it isn't switched on yet.
+- **PIN emails**: the reset code comes in the language the student is using. The temporary PIN you send from the Teacher page is in all three languages.
+- **The Teacher page stays in English.** Quiz misses are saved in English, so your reports read the same whichever language a student uses; a student in Spanish or Portuguese sees their own misses in that language.
+- **Chrome's Translate**: Chrome can offer to translate a page into the reader's own language. It never touches the Hebrew, the transliteration or students' names, so the lessons stay as taught. In Spanish or Portuguese, Chrome doesn't translate the page at all, since the student chose that language. In English it may still translate the menus and instructions for a student who reads another language better. The Teacher page is never translated.
 
 ## Getting quiz results
 

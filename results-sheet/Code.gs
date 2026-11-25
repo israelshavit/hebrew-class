@@ -835,10 +835,10 @@ function emailTempPin(data) {
   var temp = String(100 + Math.floor(Math.random() * 900));
   try {
     // The script doesn't know which language the student uses, so this one is
-    // in English and Spanish.
+    // in English, Spanish and Portuguese.
     MailApp.sendEmail({
       to: student.email,
-      subject: "Hebrew Class: your temporary PIN / Clase de hebreo: tu PIN temporal",
+      subject: "Hebrew Class: your temporary PIN / Clase de hebreo: tu PIN temporal / Aula de hebraico: seu PIN temporário",
       body: "Hello " + student.name + ",\n\n" +
         "Your teacher has reset your Hebrew Class PIN. Your temporary PIN is: " + temp + "\n\n" +
         "Sign in" + (site ? " at " + site : "") + " with your name and this PIN, then choose your own PIN. " +
@@ -847,7 +847,12 @@ function emailTempPin(data) {
         "Hola, " + student.name + ":\n\n" +
         "Tu docente restableció tu PIN de la Clase de hebreo. Tu PIN temporal es: " + temp + "\n\n" +
         "Entra" + (site ? " en " + site : "") + " con tu nombre y este PIN, y luego elige tu propio PIN. " +
-        "Tu PIN anterior ya no funciona. Tus puntuaciones se conservan.\n"
+        "Tu PIN anterior ya no funciona. Tus puntuaciones se conservan.\n\n" +
+        "---\n\n" +
+        "Olá, " + student.name + "!\n\n" +
+        "Seu professor redefiniu seu PIN da Aula de hebraico. Seu PIN temporário é: " + temp + "\n\n" +
+        "Entre" + (site ? " em " + site : "") + " com seu nome e este PIN e depois escolha seu próprio PIN. " +
+        "Seu PIN antigo não funciona mais. Suas pontuações continuam salvas.\n"
     });
   } catch (err) {
     return reply({ ok: false, error: "mail-failed" });
@@ -920,8 +925,14 @@ function sendPinCode(data) {
 
   var code = String(Math.floor(100000 + Math.random() * 900000));
   try {
-    // In Spanish when the student asked from the site in Spanish.
-    MailApp.sendEmail(data.lang === "es" ? {
+    // In Spanish or Portuguese when the student asked from the site in that language.
+    MailApp.sendEmail(data.lang === "pt" ? {
+      to: student.email,
+      subject: "Aula de hebraico: seu código para trocar o PIN",
+      body: "Olá, " + student.name + "!\n\n" +
+        "Seu código para escolher um novo PIN da Aula de hebraico é: " + code + "\n\n" +
+        "Ele vale por " + CODE_MINUTES + " minutos. Se você não pediu, pode ignorar este e-mail; seu PIN continua o mesmo.\n"
+    } : data.lang === "es" ? {
       to: student.email,
       subject: "Clase de hebreo: tu código para cambiar el PIN",
       body: "Hola, " + student.name + ":\n\n" +
@@ -1389,11 +1400,11 @@ function boardPoints(now) {
 function translate(data) {
   var text = String(data.text || "").trim().replace(/\s+/g, " ").slice(0, 80);
   if (!text) return reply({ ok: false, error: "bad-request" });
-  // From English, or from Spanish when the site is used in Spanish. The reply
-  // says which, so the site knows this script understands Spanish.
-  var from = data.from === "es" ? "es" : "en";
+  // From English, or from Spanish or Portuguese when the site is used in that
+  // language. The reply says which, so the site knows this script understands it.
+  var from = data.from === "es" || data.from === "pt" ? data.from : "en";
   var cache = CacheService.getScriptCache();
-  var cacheKey = "tr:" + (from === "es" ? "es:" : "") + sha(text.toLowerCase());
+  var cacheKey = "tr:" + (from === "en" ? "" : from + ":") + sha(text.toLowerCase());
   var hebrew = cache.get(cacheKey);
   if (!hebrew) {
     try {
